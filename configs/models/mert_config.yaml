@@ -1,0 +1,19 @@
+# Pretrained MERT Music Representation Model Configuration
+encoder:
+  name: "m-a-p/MERT-v1-95M"
+  sample_rate: 24000
+  mono: true
+  freeze_weights: true
+  hidden_size: 768
+  pooling: "mean_max_concat"
+  output_dim: 1536
+
+head:
+  hidden_dim: 256
+  dropout: 0.30
+  num_classes: 10
+  learning_rate: 0.001
+  weight_decay: 0.01
+  batch_size: 16
+  epochs: 15
+

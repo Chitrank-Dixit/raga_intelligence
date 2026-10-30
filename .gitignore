@@ -1,0 +1,56 @@
+# Python / virtual environment
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# Audio, Datasets, and Checkpoints
+data/raw/
+data/processed/
+data/cache/
+data/zenodo/
+*.mp3
+*.wav
+*.flac
+*.ogg
+*.m4a
+*.zip
+*.tar.gz
+
+# Model Weights & Artifacts
+artifacts/checkpoints/
+artifacts/cache/
+artifacts/models/
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.onnx
+
+# Environment & Credentials
+.env
+.env.local
+*.key
+
+# Reports and Visualizations output
+reports/figures/
+reports/*.png
+reports/*.svg
+reports/*.pdf
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Podman / Docker
+.container_tmp/
+

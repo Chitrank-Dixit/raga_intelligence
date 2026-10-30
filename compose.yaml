@@ -1,0 +1,69 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: localhost/raga-intelligence:latest
+    container_name: raga-intelligence-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENV=development
+      - LOG_LEVEL=INFO
+      - DEVICE=${DEVICE:-auto}
+      - DATA_DIR=/app/data
+      - ARTIFACTS_DIR=/app/artifacts
+      - HF_HOME=/app/artifacts/cache/huggingface
+      - TORCH_HOME=/app/artifacts/cache/torch
+    volumes:
+      - ./data:/app/data:Z
+      - ./artifacts:/app/artifacts:Z
+      - ./reports:/app/reports:Z
+      - ./configs:/app/configs:ro,Z
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # GPU-enabled profile for environments with NVIDIA WSL2 / Linux GPU passthrough
+  api-gpu:
+    profiles: ["gpu"]
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: localhost/raga-intelligence:latest
+    container_name: raga-intelligence-gpu
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    devices:
+      - "/dev/dxg:/dev/dxg"
+    environment:
+      - ENV=development
+      - LOG_LEVEL=INFO
+      - DEVICE=cuda
+      - DATA_DIR=/app/data
+      - ARTIFACTS_DIR=/app/artifacts
+      - HF_HOME=/app/artifacts/cache/huggingface
+      - TORCH_HOME=/app/artifacts/cache/torch
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib
+    volumes:
+      - /usr/lib/wsl:/usr/lib/wsl:ro
+      - ./data:/app/data:Z
+      - ./artifacts:/app/artifacts:Z
+      - ./reports:/app/reports:Z
+      - ./configs:/app/configs:ro,Z
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  raga_data:
+  raga_artifacts:
+
