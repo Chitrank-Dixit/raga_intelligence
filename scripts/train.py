@@ -37,15 +37,15 @@ def main():
     )
     parser.add_argument(
         "--dataset",
-        choices=["synthetic", "saraga"],
+        choices=["synthetic", "saraga", "hindustani"],
         default="synthetic",
         help="Dataset to use for training and evaluation",
     )
     parser.add_argument(
-        "--saraga-dir",
+        "--data-dir",
         type=str,
-        default="./data/saraga_hindustani",
-        help="Path to Saraga Hindustani dataset root",
+        default="./data/hindustani_dataset",
+        help="Path to Hindustani dataset root",
     )
     parser.add_argument(
         "--classifier-type",
@@ -87,9 +87,17 @@ def main():
             duration_sec=5.0,
         )
         manifest = adapter.build_manifest()
+    elif args.dataset == "hindustani":
+        logger.info(f"Loading real Hindustani dataset from {args.data_dir}...")
+        from raga_intelligence.datasets.hindustani_dataset import HindustaniDatasetAdapter
+        adapter = HindustaniDatasetAdapter(dataset_dir=args.data_dir)
+        manifest = adapter.build_manifest()
+        if len(manifest.items) == 0:
+            logger.error("No items found in dataset directory. Exiting.")
+            return
     else:
-        logger.info(f"Loading Saraga Hindustani dataset from {args.saraga_dir}...")
-        adapter = SaragaHindustaniAdapter(dataset_dir=args.saraga_dir)
+        logger.info(f"Loading Saraga Hindustani dataset from {args.data_dir}...")
+        adapter = SaragaHindustaniAdapter(dataset_dir=args.data_dir)
         manifest = adapter.build_manifest()
         if len(manifest.items) == 0:
             logger.error("No items found in Saraga directory. Exiting.")
@@ -104,6 +112,7 @@ def main():
     )
 
     # 2. Train selected model
+    cache_path = Path("./artifacts/cache") / f"{args.dataset}_features.npz"
     if args.model == "baseline":
         save_path = out_dir / f"baseline_{args.classifier_type}.joblib"
         logger.info(f"Training baseline {args.classifier_type} classifier...")
@@ -111,18 +120,20 @@ def main():
             manifest=manifest,
             classifier_type=args.classifier_type,
             save_path=save_path,
+            cache_path=cache_path,
         )
-        report_file = rep_dir / f"baseline_{args.classifier_type}_report.md"
+        report_file = rep_dir / f"baseline_{args.classifier_type}_{args.dataset}_report.md"
 
     elif args.model == "hybrid":
-        save_path = out_dir / "hybrid_raga_model.pt"
+        save_path = out_dir / f"hybrid_{args.dataset}_model.pt"
         logger.info(f"Training hybrid fusion model for {args.epochs} epochs...")
         model, metrics = train_hybrid_pipeline(
             manifest=manifest,
             save_path=save_path,
+            cache_path=cache_path,
             epochs=args.epochs,
         )
-        report_file = rep_dir / "hybrid_fusion_report.md"
+        report_file = rep_dir / f"hybrid_fusion_{args.dataset}_report.md"
 
     # 3. Generate report
     report_md = generate_markdown_report(

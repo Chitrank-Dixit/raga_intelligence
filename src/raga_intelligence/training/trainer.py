@@ -95,9 +95,12 @@ def train_baseline_pipeline(
     manifest: DatasetManifest,
     classifier_type: str = "svm",
     save_path: Optional[Path | str] = None,
+    cache_path: Optional[Path | str] = None,
 ) -> Tuple[BaselineRagaClassifier, EvaluationMetrics]:
     """Trains and evaluates a conventional scikit-learn baseline classifier."""
-    X_train, y_train, X_val, y_val, X_test, y_test = extract_features_from_manifest(manifest)
+    X_train, y_train, X_val, y_val, X_test, y_test = extract_features_from_manifest(
+        manifest, cache_path=cache_path
+    )
 
     # Combine train + val if val is small, or fit on train
     X_fit = np.vstack([X_train, X_val]) if len(X_val) > 0 else X_train
@@ -201,11 +204,14 @@ def train_neural_head_pipeline(
 def train_hybrid_pipeline(
     manifest: DatasetManifest,
     save_path: Optional[Path | str] = None,
+    cache_path: Optional[Path | str] = None,
     epochs: int = 15,
 ) -> Tuple[HybridRagaClassifier, EvaluationMetrics]:
     """Trains late-fusion hybrid model combining pitch features and embeddings."""
     device = settings.get_torch_device()
-    X_train, y_train, X_val, y_val, X_test, y_test = extract_features_from_manifest(manifest)
+    X_train, y_train, X_val, y_val, X_test, y_test = extract_features_from_manifest(
+        manifest, cache_path=cache_path
+    )
 
     class_to_idx = {name: i for i, name in enumerate(RAGA_LIST)}
     y_train_idx = torch.tensor([class_to_idx.get(c, 0) for c in y_train], dtype=torch.long)

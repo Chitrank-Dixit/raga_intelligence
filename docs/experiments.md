@@ -21,12 +21,32 @@ The experimental protocol follows an evidence-driven progression:
 ## Experiment 1: Baseline Pitch-Derived Representation
 - **Hypothesis**: Tonic-normalized pitch class distribution (12 semi-tones relative to Shadja/Sa) and chroma profiles contain sufficient discriminative signal to separate ragas with distinct scale structures.
 - **Model**: Baseline SVM with RBF kernel and StandardScaler on 35-dimensional feature vector.
-- **Dataset**: Synthetic Hindustani evaluation cohort (40 recordings, 10 canonical ragas, 0% recording leakage).
-- **Results**:
-  - **Macro-F1 Score**: `0.8667`
-  - **Accuracy**: `0.9000`
-  - **Key Finding**: 8 of 10 ragas achieved perfect 1.000 F1 score. Confusions occurred solely between *Bhoopali* and *Deshkar*, which share an identical 5-swara pentatonic scale (`S R G P D`) and differ fundamentally in phrasing, vadi/samvadi emphasis, and ornamentation rather than static pitch histograms.
-- **Status**: Completed & Verified.
+- **Synthetic Benchmark**:
+  - Macro-F1 Score: `0.8667`, Accuracy: `0.9000` (40 recordings, 10 canonical ragas, 0% recording leakage).
+- **Real Hindustani Dataset Benchmark**:
+  - Dataset: 390 audio clips across 10 canonical ragas (`neerajaabhyankar/hindustani-raag-small`), verified 0 recording leakage across 82 distinct performances.
+  - Train: 360 clips; Test: 30 held-out unseen clips (3 per raga).
+  - Ground-truth tonic: hand-annotated Sa in Hz.
+  - **Macro-F1 Score**: `0.6067`
+  - **Weighted-F1 Score**: `0.6067`
+  - **Accuracy**: `0.6000` (Baseline random chance: `0.1000` / 10%)
+  - **Expected Calibration Error (ECE)**: `0.2003`
+  - **Per-Raga Breakdown**:
+    - *Malkauns*: F1 = `1.0000`, Precision = `1.0000`, Recall = `1.0000`
+    - *Bhairavi*: F1 = `0.8000`, Precision = `1.0000`, Recall = `0.6667`
+    - *Kafi*: F1 = `0.8000`, Precision = `1.0000`, Recall = `0.6667`
+    - *Darbari Kanada*: F1 = `0.6667`, Precision = `0.6667`, Recall = `0.6667`
+    - *Deshkar*: F1 = `0.6667`, Precision = `0.5000`, Recall = `1.0000`
+    - *Yaman*: F1 = `0.5000`, Precision = `1.0000`, Recall = `0.3333`
+    - *Bageshree*: F1 = `0.5000`, Precision = `1.0000`, Recall = `0.3333`
+    - *Todi*: F1 = `0.4000`, Precision = `0.2857`, Recall = `0.6667`
+    - *Bhoopali*: F1 = `0.4000`, Precision = `0.5000`, Recall = `0.3333`
+    - *Bhairav*: F1 = `0.3333`, Precision = `0.3333`, Recall = `0.3333`
+  - **Key Musicological Finding**:
+    1. Perfect classification on *Malkauns* due to its unmistakable pentatonic Komal Ga, Komal Dha, Komal Ni signature without Re and Pa.
+    2. Symmetric confusion between *Bhoopali* and *Deshkar*: both share the identical Audav scale `S R G P D`. Static pitch distributions distinguish them moderately based on Vadi emphasis (Bhoopali on Gandhar vs Deshkar on Dhaivat), but melodic progression (*pakad*) is necessary for complete disambiguation.
+    3. Confusions between *Bhairav* and *Todi* arise from shared Komal Re and Komal Dha; microtonal pitch inflections (*meend* / *andolan*) provide the critical distinction.
+- **Status**: Completed & Verified on real recordings. Checkpoint saved to `artifacts/checkpoints/baseline_svm.joblib`. Report written to `reports/baseline_svm_hindustani_report.md`.
 
 ---
 
@@ -42,4 +62,22 @@ The experimental protocol follows an evidence-driven progression:
 - **Model**: `HybridRagaClassifier` (Late fusion of 35-dim musical features + 1536-dim embeddings).
 - **Findings**: On small cohorts, unconditioned embeddings introduce parameter overhead and require extensive pre-training adaptation. The explicit pitch representation baseline markedly outperforms uncalibrated fusion.
 - **Status**: Completed. Confirms ADR 003.
+
+---
+
+## Experiment 4: Empirical Raga Reference Representations (Corpus Centroids)
+- **Method**: Extracted 12-bin tonic-relative Pitch Class Distribution centroids across all 360 training performances in the real Hindustani dataset.
+- **Results**:
+  - Empirical centroids capture the exact modal signatures of the 10 ragas (e.g. Malkauns `S-g-M-d-n`, Todi `S-r-g-M'-d-N`, Yaman `S-R-G-M'-P-D-N`).
+  - Integrated into `RagaPrototypeRegistry` to power Bhattacharyya affinity and cosine distance in `MelodicSimilarityEngine`.
+- **Status**: Implemented and verified in `src/raga_intelligence/similarity/prototypes.py`.
+
+---
+
+## Experiment 5: Cross-Genre Melodic Similarity & Calibrated Abstention
+- **Hypothesis**: Multi-criterion gate combining spectral flatness (> 0.15), voiced ratio (< 0.15), and peak similarity score (< 0.40) reliably detects unpitched noise, speech, and atonal percussion without suppressing legitimate modal melodies.
+- **Evaluation**:
+  - White noise test: Spectral flatness = 0.56 (> 0.15 threshold) -> **Abstention successfully triggered** with diagnostic explanation.
+  - Held-out classical test clips: Spectral flatness < 0.05, Voiced ratio > 95% -> **No false abstention**, ranked matches generated with aligned swaras and supporting temporal windows.
+- **Status**: Verified in both CLI (`scripts/evaluate.py`) and REST API (`/analyze`).
 

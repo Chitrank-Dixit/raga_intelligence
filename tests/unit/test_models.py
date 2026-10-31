@@ -95,3 +95,6 @@ def test_melodic_similarity_prototypes():
     # Bhoopali is audav (5 notes): S R G P D (omits M and N)
     assert "M" not in bhoopali.allowed_swaras
     assert "N" not in bhoopali.allowed_swaras
+    # Verify empirical PCD presence and normalization
+    assert bhoopali.empirical_pcd is not None
+    assert np.isclose(np.sum(bhoopali.effective_pcd), 1.0)

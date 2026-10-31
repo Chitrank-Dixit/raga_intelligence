@@ -77,3 +77,14 @@ def test_synthetic_dataset_adapter(tmp_path: Path):
     validation = manifest.validate_splits()
     assert validation["valid_no_recording_leakage"] is True
 
+
+def test_hindustani_dataset_adapter():
+    from raga_intelligence.datasets.hindustani_dataset import HindustaniDatasetAdapter
+    adapter = HindustaniDatasetAdapter(dataset_dir="./data/hindustani_dataset")
+    manifest = adapter.build_manifest()
+    assert len(manifest.items) == 390
+    validation = manifest.validate_splits()
+    assert validation["valid_no_recording_leakage"] is True
+    assert validation["train_recordings_count"] == 360
+    assert validation["test_recordings_count"] == 30
+

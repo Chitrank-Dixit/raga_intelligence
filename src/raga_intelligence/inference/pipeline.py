@@ -53,10 +53,16 @@ class InferencePipeline:
         self.extractor = BaselineFeatureExtractor()
 
         self.classifier: Optional[BaselineRagaClassifier] = None
-        if baseline_classifier_path and Path(baseline_classifier_path).exists():
+        target_ckpt = baseline_classifier_path
+        if target_ckpt is None:
+            default_ckpt = Path("./artifacts/checkpoints/baseline_svm.joblib")
+            if default_ckpt.exists():
+                target_ckpt = default_ckpt
+
+        if target_ckpt and Path(target_ckpt).exists():
             try:
-                self.classifier = BaselineRagaClassifier.load(baseline_classifier_path)
-                logger.info(f"Loaded classifier from {baseline_classifier_path}")
+                self.classifier = BaselineRagaClassifier.load(target_ckpt)
+                logger.info(f"Loaded classifier from {target_ckpt}")
             except Exception as e:
                 logger.warning(f"Could not load baseline classifier: {e}")
 
