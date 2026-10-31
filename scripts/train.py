@@ -21,6 +21,7 @@ from raga_intelligence.evaluation.reporting import generate_markdown_report
 from raga_intelligence.training.trainer import (
     train_baseline_pipeline,
     train_hybrid_pipeline,
+    train_mert_pipeline,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -31,7 +32,7 @@ def main():
     parser = argparse.ArgumentParser(description="Train raga recognition models.")
     parser.add_argument(
         "--model",
-        choices=["baseline", "hybrid"],
+        choices=["baseline", "hybrid", "mert_frozen"],
         default="baseline",
         help="Model architecture to train",
     )
@@ -113,6 +114,8 @@ def main():
 
     # 2. Train selected model
     cache_path = Path("./artifacts/cache") / f"{args.dataset}_features.npz"
+    mert_cache_path = Path("./artifacts/cache") / f"{args.dataset}_mert_embeddings.npz"
+
     if args.model == "baseline":
         save_path = out_dir / f"baseline_{args.classifier_type}.joblib"
         logger.info(f"Training baseline {args.classifier_type} classifier...")
@@ -124,6 +127,17 @@ def main():
         )
         report_file = rep_dir / f"baseline_{args.classifier_type}_{args.dataset}_report.md"
 
+    elif args.model == "mert_frozen":
+        save_path = out_dir / f"mert_frozen_{args.dataset}_model.pt"
+        logger.info(f"Training frozen MERT classification head for {args.epochs} epochs...")
+        model, metrics = train_mert_pipeline(
+            manifest=manifest,
+            save_path=save_path,
+            cache_path=mert_cache_path,
+            epochs=args.epochs,
+        )
+        report_file = rep_dir / f"mert_frozen_{args.dataset}_report.md"
+
     elif args.model == "hybrid":
         save_path = out_dir / f"hybrid_{args.dataset}_model.pt"
         logger.info(f"Training hybrid fusion model for {args.epochs} epochs...")
@@ -131,6 +145,7 @@ def main():
             manifest=manifest,
             save_path=save_path,
             cache_path=cache_path,
+            mert_cache_path=mert_cache_path,
             epochs=args.epochs,
         )
         report_file = rep_dir / f"hybrid_fusion_{args.dataset}_report.md"

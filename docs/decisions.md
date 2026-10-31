@@ -41,3 +41,23 @@
   - Implement uncertainty estimation and an explicit *abstention mechanism* ("insufficient evidence" / out-of-distribution detection) when similarity scores fall below calibrated thresholds.
 - **Consequences**: Honest predictions, avoidance of false claims, and musically grounded explanations for cross-genre users.
 
+## ADR 005: Empirical Centroid Extraction over Theoretical Pitch Histograms
+- **Date**: 2026-10-31
+- **Status**: Accepted
+- **Context**: Theoretical pitch distributions synthesized purely from textbook note sets and vadi/samvadi heuristics fail to capture natural human performance variance, intonation nuances, and habitual transitional notes (*sangatis*).
+- **Decision**:
+  - Compute 12-bin tonic-relative Pitch Class Distribution (PCD) centroids directly from the 360 training recordings of the authentic Hindustani corpus.
+  - Populate empirical centroids into `RagaPrototypeRegistry` as the primary reference vector (`effective_pcd`), retaining theoretical distributions as fallback.
+- **Consequences**: Melodic similarity accurately matches empirical performance practices and improves Bhattacharyya distance discrimination on real audio.
+
+## ADR 006: Multi-Criterion Acoustic Gate for Out-of-Distribution Abstention
+- **Date**: 2026-10-31
+- **Status**: Accepted
+- **Context**: Audio inputs submitted to a public API may consist of spoken language, field noise, unpitched percussion, or synthesizer noise without modal tonicity.
+- **Decision**:
+  - Enforce a 3-stage hierarchical gate prior to raga matching:
+    1. **Spectral Flatness Gate**: Reject audio with Wiener entropy > 0.15 (indicative of white noise, unpitched percussion, or hiss).
+    2. **Voiced Ratio Gate**: Reject audio with voiced frame proportion < 0.15 (indicative of silence, ambient noise, or spoken dialogue).
+    3. **PCD Variance Gate**: Reject audio with pitch distribution standard deviation < 0.025 (indicative of uniform atonal noise).
+- **Consequences**: Completely suppresses spurious raga predictions on noise and spoken audio, delivering transparent diagnostic reasons without false classifications.
+

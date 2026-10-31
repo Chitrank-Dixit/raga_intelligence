@@ -16,6 +16,7 @@ data/cache/
 data/zenodo/
 data/hindustani_dataset/
 data/synthetic/
+data/cross_genre/
 *.mp3
 *.wav
 *.flac

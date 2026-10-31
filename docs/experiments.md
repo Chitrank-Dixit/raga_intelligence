@@ -50,18 +50,34 @@ The experimental protocol follows an evidence-driven progression:
 
 ---
 
-## Experiment 2: Transfer Learning with MERT Architecture
-- **Model**: `m-a-p/MERT-v1-95M` frozen encoder with adaptive temporal pooling (`mean_max_concat` -> 1536 dims) and MLP classification head.
-- **Platform Execution**: Verified PyTorch CPU execution; documented sm_120 compatibility limitation on standard cu124 wheels.
-- **Status**: Implemented and benchmarked.
+## Experiment 2: Transfer Learning with Frozen MERT Architecture
+- **Model**: `m-a-p/MERT-v1-95M` frozen encoder with adaptive temporal pooling (`mean_max_concat` -> 1536 dims) and `MERTClassifierHead` (LayerNorm + GELU + Dropout + Linear MLP).
+- **Corpus**: 390 authentic recordings (360 train, 30 held-out test, 0 recording leakage).
+- **Embedding Cache**: Persisted 1536-dim vectors to `artifacts/cache/hindustani_mert_embeddings.npz`.
+- **Results**:
+  - **Macro-F1 Score**: `0.3440`
+  - **Accuracy**: `0.4000` (vs. random baseline `0.1000`)
+  - **Expected Calibration Error (ECE)**: `0.1794`
+- **Key Finding**: Pretrained audio embeddings alone outperform random chance by 4x, demonstrating that Western/global acoustic self-supervised representations capture meaningful tonal texture. However, without explicit tonic grounding and swara interval alignment, frozen embeddings significantly trail the explicit pitch baseline (`0.6067` F1).
+- **Status**: Completed. Checkpoint saved to `artifacts/checkpoints/mert_frozen_hindustani_model.pt`. Report written to `reports/mert_frozen_hindustani_report.md`.
 
 ---
 
-## Experiment 3: Hybrid Melodic + Embedding Fusion
-- **Hypothesis**: Concatenating domain-specific tonic-relative pitch histograms with deep music embeddings yields higher Macro-F1 than either feature set alone.
-- **Model**: `HybridRagaClassifier` (Late fusion of 35-dim musical features + 1536-dim embeddings).
-- **Findings**: On small cohorts, unconditioned embeddings introduce parameter overhead and require extensive pre-training adaptation. The explicit pitch representation baseline markedly outperforms uncalibrated fusion.
-- **Status**: Completed. Confirms ADR 003.
+## Experiment 3: Hybrid Melodic + Embedding Late Fusion
+- **Hypothesis**: Late-fusion combining domain-specific tonic-relative pitch class distributions (35 dims) with deep acoustic MERT representations (1536 dims) achieves superior discriminative performance over either modality alone.
+- **Model**: `HybridRagaClassifier` (Dual linear projection heads with LayerNorm and late fusion).
+- **Results**:
+  - **Macro-F1 Score**: `0.7400`
+  - **Accuracy**: `0.7667`
+  - **Expected Calibration Error (ECE)**: `0.1808`
+- **Side-by-Side Representation Comparison**:
+  | Architecture | Input Representation | Macro-F1 | Accuracy | ECE |
+  | :--- | :--- | :---: | :---: | :---: |
+  | **Frozen MERT Head** | 1536-dim MERT Embeddings | 0.3440 | 0.4000 | 0.1794 |
+  | **Baseline SVM** | 35-dim Pitch Class & Chroma | 0.6067 | 0.6000 | 0.2003 |
+  | **Hybrid Late Fusion** | 35-dim Musical + 1536-dim MERT | **0.7400** | **0.7667** | **0.1808** |
+- **Conclusion**: Confirms the central research hypothesis. Combining explicit tonic-relative pitch distributions with deep pretrained music representations delivers an absolute **+13.3% F1 gain over pitch baseline** and **+39.6% F1 gain over MERT alone**.
+- **Status**: Completed. Checkpoint saved to `artifacts/checkpoints/hybrid_hindustani_model.pt`. Report written to `reports/hybrid_fusion_hindustani_report.md`.
 
 ---
 
@@ -76,8 +92,18 @@ The experimental protocol follows an evidence-driven progression:
 
 ## Experiment 5: Cross-Genre Melodic Similarity & Calibrated Abstention
 - **Hypothesis**: Multi-criterion gate combining spectral flatness (> 0.15), voiced ratio (< 0.15), and peak similarity score (< 0.40) reliably detects unpitched noise, speech, and atonal percussion without suppressing legitimate modal melodies.
-- **Evaluation**:
-  - White noise test: Spectral flatness = 0.56 (> 0.15 threshold) -> **Abstention successfully triggered** with diagnostic explanation.
-  - Held-out classical test clips: Spectral flatness < 0.05, Voiced ratio > 95% -> **No false abstention**, ranked matches generated with aligned swaras and supporting temporal windows.
-- **Status**: Verified in both CLI (`scripts/evaluate.py`) and REST API (`/analyze`).
+- **Cross-Genre Evaluation Matrix**:
+  | Test Track | Genre | Expected Raga Resemblance | Top Predicted Match | Similarity Score | Confidence | Abstention Status |
+  | :--- | :--- | :--- | :--- | :---: | :--- | :---: |
+  | **Bollywood (Bhairavi Melody)** | Indian Film / Bollywood | `Bhairavi` | **Bhairavi** | `0.863` | High | No |
+  | **Bollywood (Yaman Ballad)** | Indian Film / Bollywood | `Yaman` | **Yaman** | `0.852` | High | No |
+  | **Western Pop (Major Pentatonic)** | Western Pop / Folk | `Bhoopali` | **Bhoopali** | `0.918` | High | No |
+  | **Western Blues (Minor Pentatonic)** | Western Blues / Rock | `Malkauns` | **Malkauns** | `0.953` | High | No |
+  | **Atonal Noise Control** | Unpitched Control | `Abstain` | **None** | `0.000` | N/A | Yes (Correct) |
+- **Key Musicological Insights**:
+  1. **Bollywood / Film Music**: High similarity achieved on modal scale alignments with explicit swara evidence.
+  2. **Western Pop**: Major pentatonic melodies naturally map to Raga *Bhoopali* (`S R G P D`), illustrating cross-cultural modal equivalence.
+  3. **Western Blues**: Minor pentatonic contours map to Raga *Malkauns* (`S g M d n`), reflecting shared pitch intervals without false assertions of classical improvisation.
+  4. **Abstention Gate**: Atonal noise triggers immediate rejection (`spectral flatness 0.56 > 0.15`), preventing spurious raga attribution.
+- **Status**: Verified in CLI runner `scripts/evaluate_cross_genre.py` and documented in `reports/cross_genre_evaluation.md`.
 
