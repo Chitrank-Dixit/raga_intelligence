@@ -105,7 +105,60 @@ The initial research cohort covers 10 representative Hindustani ragas across div
 
 ## 7. Research Datasets & Licensing
 
+- **Hindustani Raag Corpus**: 390 authentic recordings across 10 canonical ragas (`neerajaabhyankar/hindustani-raag-small`) with ground-truth hand-annotated Sa tonic (Hz). Partitioned with 0% recording leakage (360 train, 30 held-out test).
 - **Saraga Hindustani**: Zenodo DOI `10.5281/zenodo.4301737` (CC BY-NC-SA 4.0).
 - **CompMusic IAM Features**: Zenodo DOI `10.5281/zenodo.7278505` (CC BY-NC-ND 4.0).
 - **Synthetic Test Fixtures**: Deterministically synthesized within `data/synthetic` under CC0-1.0 for reproducible CI testing without external network dependencies.
+
+---
+
+## 8. Empirical Benchmark Results
+
+Evaluated across 30 held-out unseen performances (3 per raga) with verified zero recording or artist cross-split leakage:
+
+| Architecture | Input Representations | Macro-F1 | Accuracy | Calibration (ECE) | Checkpoint Path |
+| :--- | :--- | :---: | :---: | :---: | :--- |
+| **Frozen MERT Head** | 1536-dim Audio Embeddings | 0.3440 | 0.4000 | 0.1794 | `artifacts/checkpoints/mert_frozen_hindustani_model.pt` |
+| **Baseline Estimator (SVM)** | 35-dim Pitch Class & Chroma | 0.6067 | 0.6000 | 0.2003 | `artifacts/checkpoints/baseline_svm.joblib` |
+| **Hybrid Late Fusion** | 35-dim Pitch + 1536-dim MERT | **0.7400** | **0.7667** | **0.1808** | `artifacts/checkpoints/hybrid_hindustani_model.pt` |
+
+### Key Musicological & ML Findings
+1. **Domain Baseline vs. Raw Embeddings**: Pretrained audio embeddings alone (`0.3440` F1) beat random chance (`0.1000`) by 3.5x, but significantly trail explicit tonic-relative pitch class distributions (`0.6067` F1) due to the absence of tonic ($S_a$) normalization in general acoustic models.
+2. **Late-Fusion Synergy**: Combining explicit swara distributions with deep acoustic representations yields **0.7400 Macro-F1**, achieving an absolute **+13.3% gain** over the baseline and **+39.6% gain** over MERT alone.
+3. **Musicological Symmetry**: In the baseline, confusion occurs primarily between *Bhoopali* and *Deshkar* (identical Audav scale `S R G P D`, differing in vadi emphasis and phrasing). In the hybrid model, multimodal features successfully separate these ragas.
+
+---
+
+## 9. Cross-Genre Melodic Similarity & Calibrated Abstention
+
+The system decouples formal classical classification from open-world cross-genre melodic resemblance:
+
+| Track Name | Genre | Expected Resemblance | Top Predicted Match | Similarity Score | Confidence | Abstention Status |
+| :--- | :--- | :--- | :--- | :---: | :--- | :---: |
+| **Bollywood (Bhairavi Melody)** | Indian Film / Bollywood | `Bhairavi` | **Bhairavi** | 0.863 | High | No |
+| **Bollywood (Yaman Ballad)** | Indian Film / Bollywood | `Yaman` | **Yaman** | 0.852 | High | No |
+| **Western Pop (Major Pentatonic)** | Western Pop / Folk | `Bhoopali` | **Bhoopali** | 0.918 | High | No |
+| **Western Blues (Minor Pentatonic)**| Western Blues / Rock | `Malkauns` | **Malkauns** | 0.953 | High | No |
+| **Atonal Noise Control** | Unpitched Control | `Abstain` | **None** | 0.000 | N/A | **Yes (Correct)** |
+
+---
+
+## 10. CLI & Research Commands
+
+```powershell
+# Analyze any audio file with CLI inference runner
+python scripts/evaluate.py "path/to/song.mp3" --top-k 5
+
+# Run cross-genre evaluation benchmark
+python scripts/evaluate_cross_genre.py
+
+# Train baseline SVM on Hindustani dataset
+python scripts/train.py --dataset hindustani --model baseline --classifier-type svm
+
+# Train frozen MERT classification head
+python scripts/train.py --dataset hindustani --model mert_frozen --epochs 30
+
+# Train Hybrid Late-Fusion model
+python scripts/train.py --dataset hindustani --model hybrid --epochs 30
+```
 
