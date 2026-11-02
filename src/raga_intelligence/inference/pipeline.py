@@ -66,6 +66,30 @@ class InferencePipeline:
             except Exception as e:
                 logger.warning(f"Could not load baseline classifier: {e}")
 
+    def is_ready(self) -> tuple[bool, str, list[str]]:
+        """
+        Validates pipeline readiness.
+        Returns:
+            (ready_bool, active_backend_name, list_of_loaded_models)
+        """
+        loaded_models = []
+        if self.similarity_engine and len(self.similarity_engine.registry.all_prototypes()) > 0:
+            loaded_models.append("MelodicSimilarityEngine (PCD + Swara Templates)")
+        else:
+            return False, "none", []
+
+        if self.extractor is not None:
+            loaded_models.append("BaselineFeatureExtractor")
+        else:
+            return False, "none", []
+
+        active_backend = "melodic_similarity_prototypes"
+        if self.classifier is not None and getattr(self.classifier, "is_fitted", False):
+            loaded_models.append(f"BaselineRagaClassifier ({self.classifier.classifier_type})")
+            active_backend = f"baseline_{self.classifier.classifier_type}"
+
+        return True, active_backend, loaded_models
+
     def analyze_audio(
         self,
         audio_source: Union[str, Path, BinaryIO, bytes],

@@ -72,23 +72,65 @@ class BaselineRagaClassifier:
 
     def fit(self, X: np.ndarray, y: np.ndarray | List[str]) -> BaselineRagaClassifier:
         """Trains the pipeline on feature matrix X and target labels y."""
-        if isinstance(y, list) or (isinstance(y, np.ndarray) and isinstance(y[0], str)):
-            y_indices = np.array([self.class_to_idx[name] for name in y])
+        X = np.asarray(X)
+        if isinstance(y, list) or (isinstance(y, np.ndarray) and len(y) > 0 and isinstance(y[0], str)):
+            y_indices = []
+            for name in y:
+                if name not in self.class_to_idx:
+                    raise ValueError(f"Unknown raga label '{name}'. Allowed classes: {self.class_names}")
+                y_indices.append(self.class_to_idx[name])
+            y_indices = np.array(y_indices, dtype=np.int64)
         else:
-            y_indices = np.asarray(y)
+            y_indices = np.asarray(y, dtype=np.int64)
 
         self.pipeline.fit(X, y_indices)
         self.is_fitted = True
         return self
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Computes class probabilities for feature matrix X."""
+        """
+        Computes class probabilities for feature matrix X mapped strictly to canonical class_names.
+
+        Returns:
+            np.ndarray of shape (N, len(self.class_names)) where column j corresponds
+            to self.class_names[j]. For any class not present during training, its
+            probability column is explicitly assigned 0.0.
+        """
         if not self.is_fitted:
             raise RuntimeError("Classifier must be fitted before predict_proba.")
-        return self.pipeline.predict_proba(X)
+
+        X = np.asarray(X)
+        if X.ndim == 1:
+            X = X.reshape(1, -1)
+
+        raw_probs = self.pipeline.predict_proba(X)
+        n_samples = X.shape[0]
+        n_classes = len(self.class_names)
+
+        # Scikit-learn estimator stores fitted classes in .classes_
+        estimator = self.pipeline.named_steps["classifier"]
+        fitted_classes = estimator.classes_
+
+        canonical_probs = np.zeros((n_samples, n_classes), dtype=np.float32)
+
+        for col_idx, fitted_cls in enumerate(fitted_classes):
+            if isinstance(fitted_cls, (int, np.integer)):
+                global_idx = int(fitted_cls)
+            elif isinstance(fitted_cls, str):
+                global_idx = self.class_to_idx.get(fitted_cls, -1)
+            else:
+                global_idx = int(fitted_cls)
+
+            if 0 <= global_idx < n_classes:
+                canonical_probs[:, global_idx] = raw_probs[:, col_idx]
+
+        return canonical_probs
 
     def predict(self, X: np.ndarray) -> List[str]:
-        """Predicts raga names for feature matrix X."""
+        """
+        Predicts raga names for feature matrix X.
+        Guarantees strict agreement with predict_proba() and canonical class_names.
+        """
         probs = self.predict_proba(X)
         pred_indices = np.argmax(probs, axis=1)
         return [self.idx_to_class[idx] for idx in pred_indices]

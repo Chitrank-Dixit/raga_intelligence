@@ -86,6 +86,7 @@ class HindustaniDatasetAdapter(BaseDatasetAdapter):
                 raga=canonical_raga,
                 tradition="Hindustani",
                 performer=perf_id,  # Video / performance grouping
+                performance_id=perf_id,
                 duration_sec=30.0,  # Nominal segment duration
                 sample_rate=24000,
                 tonic_hz=tonic_hz,

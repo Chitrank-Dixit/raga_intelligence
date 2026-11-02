@@ -1,0 +1,77 @@
+{
+  "run_id": "baseline_random_forest_20261102_194654_cae2913c",
+  "experiment_name": "Baseline Random Forest",
+  "timestamp": "2026-11-02T19:46:54.379676+00:00",
+  "code_version": "4d12f09ddaa933ebc11448b9b89bd8fe2c526e54",
+  "seed": 42,
+  "model_name": "Random Forest",
+  "model_architecture": "RandomForestClassifier(n_estimators=100, max_depth=12)",
+  "hyperparameters": {
+    "n_estimators": 100,
+    "max_depth": 12
+  },
+  "feature_config": {
+    "type": "handcrafted_35",
+    "dim": 35
+  },
+  "dataset_name": "HindustaniRaagSmall",
+  "dataset_split_info": {},
+  "metrics": {
+    "accuracy": 0.5333,
+    "macro_f1": 0.5226,
+    "weighted_f1": 0.5226,
+    "multiclass_log_loss": 6.9426,
+    "brier_score": 1.0136,
+    "expected_calibration_error": 0.2412,
+    "confidence_intervals": {
+      "accuracy": {
+        "ci_lower": 0.3333,
+        "ci_upper": 0.7,
+        "mean": 0.5319,
+        "std": 0.0974
+      },
+      "macro_f1": {
+        "ci_lower": 0.21,
+        "ci_upper": 0.5034,
+        "mean": 0.3571,
+        "std": 0.0758
+      },
+      "weighted_f1": {
+        "ci_lower": 0.33,
+        "ci_upper": 0.7667,
+        "mean": 0.5603,
+        "std": 0.1138
+      },
+      "brier_score": {
+        "ci_lower": 0.8989,
+        "ci_upper": 1.1051,
+        "mean": 1.0152,
+        "std": 0.0538
+      },
+      "log_loss": {
+        "ci_lower": 2.4442,
+        "ci_upper": 13.3138,
+        "mean": 6.8446,
+        "std": 2.7474
+      },
+      "ece": {
+        "ci_lower": 0.1701,
+        "ci_upper": 0.3313,
+        "mean": 0.2549,
+        "std": 0.0451
+      }
+    }
+  },
+  "system_environment": {
+    "os": "Windows-11-10.0.26200-SP0",
+    "python_version": "3.12.6",
+    "torch_version": "2.15.0+cpu",
+    "torchaudio_version": "N/A",
+    "transformers_version": "5.22.1",
+    "librosa_version": "1.0.0",
+    "sklearn_version": "1.9.1",
+    "cuda_available": false,
+    "device_name": "None (CPU)"
+  },
+  "notes": "Phase 2.1 Scientific Benchmark"
+}

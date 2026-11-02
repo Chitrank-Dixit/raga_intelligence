@@ -1,0 +1,76 @@
+{
+  "run_id": "baseline_logistic_regression_20261102_194741_3d8ac566",
+  "experiment_name": "Baseline Logistic Regression",
+  "timestamp": "2026-11-02T19:47:41.081218+00:00",
+  "code_version": "4d12f09ddaa933ebc11448b9b89bd8fe2c526e54",
+  "seed": 999,
+  "model_name": "Logistic Regression",
+  "model_architecture": "LogisticRegression(max_iter=1000)",
+  "hyperparameters": {
+    "max_iter": 1000
+  },
+  "feature_config": {
+    "type": "handcrafted_35",
+    "dim": 35
+  },
+  "dataset_name": "HindustaniRaagSmall",
+  "dataset_split_info": {},
+  "metrics": {
+    "accuracy": 0.7333,
+    "macro_f1": 0.6488,
+    "weighted_f1": 0.6488,
+    "multiclass_log_loss": 7.9233,
+    "brier_score": 1.4922,
+    "expected_calibration_error": 0.6791,
+    "confidence_intervals": {
+      "accuracy": {
+        "ci_lower": 0.4658,
+        "ci_upper": 0.9333,
+        "mean": 0.7288,
+        "std": 0.1289
+      },
+      "macro_f1": {
+        "ci_lower": 0.2466,
+        "ci_upper": 0.6163,
+        "mean": 0.4382,
+        "std": 0.0955
+      },
+      "weighted_f1": {
+        "ci_lower": 0.3999,
+        "ci_upper": 0.9361,
+        "mean": 0.6859,
+        "std": 0.1426
+      },
+      "brier_score": {
+        "ci_lower": 1.3827,
+        "ci_upper": 1.6064,
+        "mean": 1.4912,
+        "std": 0.0576
+      },
+      "log_loss": {
+        "ci_lower": 5.3572,
+        "ci_upper": 10.8888,
+        "mean": 7.9319,
+        "std": 1.3871
+      },
+      "ece": {
+        "ci_lower": 0.6068,
+        "ci_upper": 0.7532,
+        "mean": 0.6785,
+        "std": 0.0374
+      }
+    }
+  },
+  "system_environment": {
+    "os": "Windows-11-10.0.26200-SP0",
+    "python_version": "3.12.6",
+    "torch_version": "2.15.0+cpu",
+    "torchaudio_version": "N/A",
+    "transformers_version": "5.22.1",
+    "librosa_version": "1.0.0",
+    "sklearn_version": "1.9.1",
+    "cuda_available": false,
+    "device_name": "None (CPU)"
+  },
+  "notes": "Phase 2.1 Scientific Benchmark"
+}

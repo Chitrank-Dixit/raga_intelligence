@@ -1,0 +1,101 @@
+{
+  "all_handcrafted_35": {
+    "group_name": "all_handcrafted_35",
+    "feature_dimension": 35,
+    "accuracy": 0.4667,
+    "macro_f1": 0.4663,
+    "weighted_f1": 0.4663,
+    "multiclass_log_loss": 3.9826,
+    "brier_score": 1.1951,
+    "delta_macro_f1": 0.0,
+    "delta_accuracy": 0.0
+  },
+  "pcd": {
+    "group_name": "pcd",
+    "feature_dimension": 12,
+    "accuracy": 0.4,
+    "macro_f1": 0.3667,
+    "weighted_f1": 0.3667,
+    "multiclass_log_loss": 3.909,
+    "brier_score": 1.2287,
+    "delta_macro_f1": -0.0997,
+    "delta_accuracy": -0.0667
+  },
+  "chroma": {
+    "group_name": "chroma",
+    "feature_dimension": 12,
+    "accuracy": 0.3667,
+    "macro_f1": 0.3044,
+    "weighted_f1": 0.3044,
+    "multiclass_log_loss": 3.5526,
+    "brier_score": 1.183,
+    "delta_macro_f1": -0.162,
+    "delta_accuracy": -0.1
+  },
+  "pitch_combined": {
+    "group_name": "pitch_combined",
+    "feature_dimension": 24,
+    "accuracy": 0.4667,
+    "macro_f1": 0.4806,
+    "weighted_f1": 0.4806,
+    "multiclass_log_loss": 4.0496,
+    "brier_score": 1.2607,
+    "delta_macro_f1": 0.0142,
+    "delta_accuracy": 0.0
+  },
+  "spectral": {
+    "group_name": "spectral",
+    "feature_dimension": 10,
+    "accuracy": 0.1333,
+    "macro_f1": 0.1333,
+    "weighted_f1": 0.1333,
+    "multiclass_log_loss": 2.9106,
+    "brier_score": 1.047,
+    "delta_macro_f1": -0.333,
+    "delta_accuracy": -0.3333
+  },
+  "voiced": {
+    "group_name": "voiced",
+    "feature_dimension": 1,
+    "accuracy": 0.1,
+    "macro_f1": 0.0187,
+    "weighted_f1": 0.0187,
+    "multiclass_log_loss": 2.3392,
+    "brier_score": 0.9091,
+    "delta_macro_f1": -0.4476,
+    "delta_accuracy": -0.3667
+  },
+  "spectral_and_voiced": {
+    "group_name": "spectral_and_voiced",
+    "feature_dimension": 11,
+    "accuracy": 0.1333,
+    "macro_f1": 0.1333,
+    "weighted_f1": 0.1333,
+    "multiclass_log_loss": 2.9014,
+    "brier_score": 1.051,
+    "delta_macro_f1": -0.333,
+    "delta_accuracy": -0.3333
+  },
+  "mert_embeddings": {
+    "group_name": "mert_embeddings",
+    "feature_dimension": 1536,
+    "accuracy": 0.5,
+    "macro_f1": 0.4112,
+    "weighted_f1": 0.4112,
+    "multiclass_log_loss": 3.4537,
+    "brier_score": 1.2039,
+    "delta_macro_f1": -0.0552,
+    "delta_accuracy": 0.0333
+  },
+  "hybrid_all": {
+    "group_name": "hybrid_all",
+    "feature_dimension": 1571,
+    "accuracy": 0.4667,
+    "macro_f1": 0.3512,
+    "weighted_f1": 0.3512,
+    "multiclass_log_loss": 3.5249,
+    "brier_score": 1.2182,
+    "delta_macro_f1": -0.1151,
+    "delta_accuracy": 0.0
+  }
+}

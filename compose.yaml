@@ -1,4 +1,7 @@
 services:
+  # --------------------------------------------------------------------------
+  # 1. Production / Development Inference API (CPU Default)
+  # --------------------------------------------------------------------------
   api:
     build:
       context: .
@@ -11,7 +14,7 @@ services:
     environment:
       - ENV=development
       - LOG_LEVEL=INFO
-      - DEVICE=${DEVICE:-auto}
+      - DEVICE=cpu
       - DATA_DIR=/app/data
       - ARTIFACTS_DIR=/app/artifacts
       - HF_HOME=/app/artifacts/cache/huggingface
@@ -28,14 +31,16 @@ services:
       retries: 3
       start_period: 15s
 
-  # GPU-enabled profile for environments with NVIDIA WSL2 / Linux GPU passthrough
+  # --------------------------------------------------------------------------
+  # 2. GPU-Accelerated Inference API (WSL2 / Linux GPU Passthrough)
+  # --------------------------------------------------------------------------
   api-gpu:
     profiles: ["gpu"]
     build:
       context: .
       dockerfile: Containerfile
     image: localhost/raga-intelligence:latest
-    container_name: raga-intelligence-gpu
+    container_name: raga-intelligence-api-gpu
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -58,12 +63,59 @@ services:
       - ./configs:/app/configs:ro,Z
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
 
-volumes:
-  raga_data:
-  raga_artifacts:
+  # --------------------------------------------------------------------------
+  # 3. Independent Model Training Service (CPU Profile)
+  # --------------------------------------------------------------------------
+  trainer:
+    profiles: ["training"]
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: localhost/raga-intelligence:latest
+    container_name: raga-intelligence-trainer
+    entrypoint: ["python", "scripts/train.py"]
+    command: ["--manifest", "data/saraga_hindustani/manifest.json", "--model", "hybrid", "--device", "cpu"]
+    environment:
+      - ENV=development
+      - LOG_LEVEL=INFO
+      - DEVICE=cpu
+      - DATA_DIR=/app/data
+      - ARTIFACTS_DIR=/app/artifacts
+      - HF_HOME=/app/artifacts/cache/huggingface
+      - TORCH_HOME=/app/artifacts/cache/torch
+    volumes:
+      - ./data:/app/data:Z
+      - ./artifacts:/app/artifacts:Z
+      - ./reports:/app/reports:Z
+      - ./configs:/app/configs:ro,Z
 
+  # --------------------------------------------------------------------------
+  # 4. Independent Model Training Service (GPU Profile)
+  # --------------------------------------------------------------------------
+  trainer-gpu:
+    profiles: ["gpu-training"]
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: localhost/raga-intelligence:latest
+    container_name: raga-intelligence-trainer-gpu
+    entrypoint: ["python", "scripts/train.py"]
+    command: ["--manifest", "data/saraga_hindustani/manifest.json", "--model", "hybrid", "--device", "cuda"]
+    devices:
+      - "/dev/dxg:/dev/dxg"
+    environment:
+      - ENV=development
+      - LOG_LEVEL=INFO
+      - DEVICE=cuda
+      - DATA_DIR=/app/data
+      - ARTIFACTS_DIR=/app/artifacts
+      - HF_HOME=/app/artifacts/cache/huggingface
+      - TORCH_HOME=/app/artifacts/cache/torch
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib
+    volumes:
+      - /usr/lib/wsl:/usr/lib/wsl:ro
+      - ./data:/app/data:Z
+      - ./artifacts:/app/artifacts:Z
+      - ./reports:/app/reports:Z
+      - ./configs:/app/configs:ro,Z

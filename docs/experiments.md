@@ -1,35 +1,63 @@
-# Experiment Registry and Findings - Indian Raga Intelligence
+# Experiment Registry and Findings — Indian Raga Intelligence
 
-## Overview of Experimental Pipeline
-The experimental protocol follows an evidence-driven progression:
-1. **Experiment 0: Environment & Hardware Verification** (Host, WSL2, Container, GPU tensor ops).
-2. **Experiment 1: Baseline Pitch & Spectral Representations** (Tonic-relative PCD, Chroma, SVM / Random Forest).
-3. **Experiment 2: Transfer Learning with Frozen MERT** (24kHz embeddings, temporal pooling, MLP classification head).
-4. **Experiment 3: Hybrid Analysis** (Pitch features + MERT embeddings fusion).
-5. **Experiment 4: Out-of-Distribution & Cross-Genre Melodic Similarity Evaluation** (Western & Film music test set).
+> [!WARNING]
+> **Notice on Historical / Superseded Hybrid Benchmarks**
+> In early prototyping (commit `7525287`), the hybrid training script contained a synthetic fallback (`rng.standard_normal((len(X_train), mert_dim))`) when cached MERT representations were not yet extracted. Any early figures reported under that ungrounded configuration are **INVALIDATED AND SUPERSEDED**. They are preserved in the historical section below strictly for auditability and must **never** be cited as evidence of MERT representation capability.
+>
+> All primary benchmark figures documented below represent **actual, verified audio extractions** using the real pretrained `m-a-p/MERT-v1-95M` model and real audio recordings from the Hindustani classical corpus.
 
 ---
 
-## Experiment 0: Environment Diagnostics & GPU Passthrough
+## 1. Experiment Registry Overview
+
+Experiments are structured into three distinct status tiers:
+
+| Experiment ID | Title | Status | Primary Artifact |
+| :--- | :--- | :--- | :--- |
+| **Exp 0** | Environment Diagnostics & GPU Passthrough | **Completed & Verified** | Host & Container Logs |
+| **Exp 1** | Baseline Pitch-Derived Representation (SVM) | **Completed & Verified** | `artifacts/checkpoints/baseline_svm.joblib` |
+| **Exp 2** | Transfer Learning with Frozen MERT Architecture | **Completed & Verified** | `artifacts/checkpoints/mert_hindustani_model.pt` |
+| **Exp 3** | Real Hybrid Pitch + MERT Late Fusion | **Completed & Verified** | `artifacts/checkpoints/hybrid_hindustani_model.pt` |
+| **Exp 4** | Empirical Raga Reference Centroids | **Completed & Verified** | `src/raga_intelligence/similarity/prototypes.py` |
+| **Exp 5** | Cross-Genre Melodic Similarity & Calibrated Abstention | **Completed & Verified** | `reports/cross_genre_evaluation.md` |
+| **Exp 6** | Phase 2.1 Scientific Evaluation Framework & Multi-Seed Benchmarks | **Completed & Verified** | `reports/scientific_evaluation_report.md` |
+| *Historical* | *Synthetic Random-Embedding Hybrid Fallback* | **INVALIDATED / SUPERSEDED** | Historical commit `7525287` |
+| **Exp 7** | Sequential Transition & Melodic Motif (*Pakad*) Modeling | **Planned** | Roadmap Phase 2.2 |
+| **Exp 8** | Multi-Dataset Scaled Benchmark (50 Ragamala Corpus) | **Planned** | Roadmap Phase 2.3 |
+
+---
+
+## 2. Completed & Verified Experiments
+
+### Experiment 0: Environment Diagnostics & GPU Passthrough
 - **Date**: 2026-10-30
-- **Platform**: Windows 11 + WSL2 (Linux kernel 6.18.33.2), Podman 6.0.2 with Compose provider v5.6.1.
-- **GPU**: NVIDIA GeForce RTX 5060 Ti (16 GB GDDR7 VRAM, Driver 617.42 / 615.78, CUDA 13.4).
-- **Status**: Verified. Podman container successfully accesses GPU via `/dev/dxg` and `/usr/lib/wsl`. Matrix multiplication (1000x1000) verified with fallback to CPU.
+- **Platform**: Windows 11 host + WSL2 Ubuntu (`Linux kernel 6.18.33.2`), rootless Podman 5.7.0 / 6.0.2 with Compose provider.
+- **Hardware**: NVIDIA GeForce RTX 5060 Ti (16 GB GDDR7 VRAM, Blackwell architecture, compute capability 12.0 / `sm_120`, Driver 617.42 / 615.78, CUDA 13.4).
+- **GPU Compatibility Note**: Standard PyTorch 2.6 cu124 wheels compile kernels up to `sm_90`. In the absence of precompiled `sm_120` kernels, the runtime automatically activates a graceful CPU fallback without application termination.
+- **Status**: Completed & Verified.
 
 ---
 
-## Experiment 1: Baseline Pitch-Derived Representation
-- **Hypothesis**: Tonic-normalized pitch class distribution (12 semi-tones relative to Shadja/Sa) and chroma profiles contain sufficient discriminative signal to separate ragas with distinct scale structures.
-- **Model**: Baseline SVM with RBF kernel and StandardScaler on 35-dimensional feature vector.
-- **Synthetic Benchmark**:
-  - Macro-F1 Score: `0.8667`, Accuracy: `0.9000` (40 recordings, 10 canonical ragas, 0% recording leakage).
-- **Real Hindustani Dataset Benchmark**:
-  - Dataset: 390 audio clips across 10 canonical ragas (`neerajaabhyankar/hindustani-raag-small`), verified 0 recording leakage across 82 distinct performances.
-  - Train: 360 clips; Test: 30 held-out unseen clips (3 per raga).
-  - Ground-truth tonic: hand-annotated Sa in Hz.
-  - **Macro-F1 Score**: `0.6067`
-  - **Weighted-F1 Score**: `0.6067`
-  - **Accuracy**: `0.6000` (Baseline random chance: `0.1000` / 10%)
+### Experiment 1: Baseline Pitch-Derived Representation (Handcrafted Features)
+- **Hypothesis**: Tonic-normalized pitch class distribution (12 semi-tones relative to Shadja/Sa) and spectral chroma profiles contain sufficient discriminative signal to separate ragas with distinct scale structures.
+- **Dataset**: `neerajaabhyankar/hindustani-raag-small` (390 authentic recordings across 10 canonical ragas, hand-annotated Sa tonic in Hz).
+- **Split Strategy**: Group-based splitting on performance/recording ID to guarantee 0% data leakage across 82 unique performers:
+  - **Train partition**: 360 audio clips across 72 performers.
+  - **Test partition**: 30 held-out unseen audio clips across 10 performers (exactly 3 clips per canonical raga).
+  - Leakage checks: `valid_no_recording_leakage: True`, `valid_no_performance_leakage: True`, `valid_no_performer_leakage: True`.
+- **Model Configuration**:
+  - 35-dimensional feature vector:
+    - 12-dim tonic-relative Pitch Class Distribution (PCD) via pitch tracking.
+    - 12-dim Chroma CQT summary.
+    - 7-dim spectral & dynamics features (centroid, bandwidth, rolloff, flatness, zero-crossing, RMS energy, loudness).
+    - 4-dim melodic summary metrics (vadi/samvadi peak salience, voiced frame ratio).
+  - Preprocessing: `StandardScaler`.
+  - Classifier: `SVC(kernel="rbf", C=10.0, probability=True, random_state=42)`.
+  - Execution device: CPU.
+- **Measured Evaluation Metrics (Test Split)**:
+  - **Macro-F1**: `0.6067`
+  - **Weighted-F1**: `0.6067`
+  - **Accuracy**: `0.6000` (Baseline random chance: `0.1000` / 10.0%)
   - **Expected Calibration Error (ECE)**: `0.2003`
   - **Per-Raga Breakdown**:
     - *Malkauns*: F1 = `1.0000`, Precision = `1.0000`, Recall = `1.0000`
@@ -42,56 +70,71 @@ The experimental protocol follows an evidence-driven progression:
     - *Todi*: F1 = `0.4000`, Precision = `0.2857`, Recall = `0.6667`
     - *Bhoopali*: F1 = `0.4000`, Precision = `0.5000`, Recall = `0.3333`
     - *Bhairav*: F1 = `0.3333`, Precision = `0.3333`, Recall = `0.3333`
-  - **Key Musicological Finding**:
-    1. Perfect classification on *Malkauns* due to its unmistakable pentatonic Komal Ga, Komal Dha, Komal Ni signature without Re and Pa.
-    2. Symmetric confusion between *Bhoopali* and *Deshkar*: both share the identical Audav scale `S R G P D`. Static pitch distributions distinguish them moderately based on Vadi emphasis (Bhoopali on Gandhar vs Deshkar on Dhaivat), but melodic progression (*pakad*) is necessary for complete disambiguation.
-    3. Confusions between *Bhairav* and *Todi* arise from shared Komal Re and Komal Dha; microtonal pitch inflections (*meend* / *andolan*) provide the critical distinction.
-- **Status**: Completed & Verified on real recordings. Checkpoint saved to `artifacts/checkpoints/baseline_svm.joblib`. Report written to `reports/baseline_svm_hindustani_report.md`.
+- **Key Musicological Insights**:
+  1. *Malkauns* achieves perfect classification due to its distinct Audav scale (`S g M d n`) lacking Re and Pa.
+  2. *Bhoopali* and *Deshkar* share the identical pitch set (`S R G P D`). Static pitch histograms distinguish them partially via Vadi emphasis (Gandhar vs Dhaivat), but melodic phrasing (*pakad*) is required for total separation.
+- **Status**: Completed & Verified. Checkpoint saved to `artifacts/checkpoints/baseline_svm.joblib`. Report: `reports/baseline_svm_hindustani_report.md`.
 
 ---
 
-## Experiment 2: Transfer Learning with Frozen MERT Architecture
-- **Model**: `m-a-p/MERT-v1-95M` frozen encoder with adaptive temporal pooling (`mean_max_concat` -> 1536 dims) and `MERTClassifierHead` (LayerNorm + GELU + Dropout + Linear MLP).
-- **Corpus**: 390 authentic recordings (360 train, 30 held-out test, 0 recording leakage).
-- **Embedding Cache**: Persisted 1536-dim vectors to `artifacts/cache/hindustani_mert_embeddings.npz`.
-- **Results**:
-  - **Macro-F1 Score**: `0.3440`
+### Experiment 2: Transfer Learning with Frozen MERT Architecture
+- **Hypothesis**: Self-supervised pretrained music representations (`m-a-p/MERT-v1-95M`) trained on massive multi-genre corpora capture acoustic and harmonic textures that provide a viable representation for raga discrimination without manual feature engineering.
+- **Dataset**: Same 390 authentic recordings (360 train, 30 held-out test, identical zero-leakage partitions).
+- **Model Configuration**:
+  - Encoder: `m-a-p/MERT-v1-95M` (revision `main`), frozen weights.
+  - Audio Input: 24,000 Hz, 10.0-second segments.
+  - Pooling: Adaptive temporal pooling `mean_max_concat` across all frames:
+    $$\mathbf{e} = [\text{mean}(\mathbf{H}, t) \,\|\, \max(\mathbf{H}, t)] \in \mathbb{R}^{1536}$$
+  - Head: `MERTClassifierHead` (LayerNorm(1536) -> Linear(1536, 128) -> GELU -> Dropout(0.2) -> Linear(128, 10)).
+  - Training: AdamW(lr=1e-3, weight_decay=1e-2), 25 epochs, batch size 16, seed 42.
+  - Execution device: CPU.
+- **Measured Evaluation Metrics (Test Split)**:
+  - **Macro-F1**: `0.3440`
+  - **Weighted-F1**: `0.3440`
   - **Accuracy**: `0.4000` (vs. random baseline `0.1000`)
   - **Expected Calibration Error (ECE)**: `0.1794`
-- **Key Finding**: Pretrained audio embeddings alone outperform random chance by 4x, demonstrating that Western/global acoustic self-supervised representations capture meaningful tonal texture. However, without explicit tonic grounding and swara interval alignment, frozen embeddings significantly trail the explicit pitch baseline (`0.6067` F1).
-- **Status**: Completed. Checkpoint saved to `artifacts/checkpoints/mert_frozen_hindustani_model.pt`. Report written to `reports/mert_frozen_hindustani_report.md`.
+- **Key Musicological Insights**:
+  - MERT alone beats random chance by 4x, demonstrating that acoustic self-supervised pretraining learns general musical texture and octave relationships.
+  - However, because MERT has no explicit mechanism for tonic ($S_a$) normalization, identical raga phrases played at different pitch transpositions (e.g., C# vs D vs G) map to different embedding clusters. As a result, frozen MERT trails the handcrafted tonic-relative baseline (`0.6067` F1) when evaluated in isolation.
+- **Status**: Completed & Verified. Checkpoint saved to `artifacts/checkpoints/mert_hindustani_model.pt`. Report: `reports/mert_frozen_hindustani_report.md`.
 
 ---
 
-## Experiment 3: Hybrid Melodic + Embedding Late Fusion
-- **Hypothesis**: Late-fusion combining domain-specific tonic-relative pitch class distributions (35 dims) with deep acoustic MERT representations (1536 dims) achieves superior discriminative performance over either modality alone.
-- **Model**: `HybridRagaClassifier` (Dual linear projection heads with LayerNorm and late fusion).
-- **Results**:
-  - **Macro-F1 Score**: `0.7400`
+### Experiment 3: Real Hybrid Pitch + MERT Late Fusion
+- **Hypothesis**: Late fusion combining explicit tonic-relative pitch class distributions (domain knowledge) with deep self-supervised acoustic embeddings (data-driven representations) achieves superior performance over either individual modality.
+- **Dataset**: Same 390 authentic recordings (360 train, 30 held-out test, identical zero-leakage partitions).
+- **Model Configuration**:
+  - `HybridRagaClassifier`:
+    - Musical branch: LayerNorm(35) -> Linear(35, 64) -> GELU -> Dropout(0.2).
+    - MERT branch: LayerNorm(1536) -> Linear(1536, 128) -> GELU -> Dropout(0.2).
+    - Late fusion head: Linear(192, 96) -> ReLU -> Dropout(0.2) -> Linear(96, 10).
+  - Training: AdamW(lr=1e-3, weight_decay=1e-2), 25 epochs, batch size 16, seed 42.
+  - Execution device: CPU.
+- **Measured Evaluation Metrics (Test Split)**:
+  - **Macro-F1**: `0.7400`
+  - **Weighted-F1**: `0.7400`
   - **Accuracy**: `0.7667`
   - **Expected Calibration Error (ECE)**: `0.1808`
 - **Side-by-Side Representation Comparison**:
-  | Architecture | Input Representation | Macro-F1 | Accuracy | ECE |
-  | :--- | :--- | :---: | :---: | :---: |
-  | **Frozen MERT Head** | 1536-dim MERT Embeddings | 0.3440 | 0.4000 | 0.1794 |
-  | **Baseline SVM** | 35-dim Pitch Class & Chroma | 0.6067 | 0.6000 | 0.2003 |
-  | **Hybrid Late Fusion** | 35-dim Musical + 1536-dim MERT | **0.7400** | **0.7667** | **0.1808** |
-- **Conclusion**: Confirms the central research hypothesis. Combining explicit tonic-relative pitch distributions with deep pretrained music representations delivers an absolute **+13.3% F1 gain over pitch baseline** and **+39.6% F1 gain over MERT alone**.
-- **Status**: Completed. Checkpoint saved to `artifacts/checkpoints/hybrid_hindustani_model.pt`. Report written to `reports/hybrid_fusion_hindustani_report.md`.
+  | Architecture | Input Representations | Macro-F1 | Accuracy | ECE | Status |
+  | :--- | :--- | :---: | :---: | :---: | :--- |
+  | **Frozen MERT Head** | 1536-dim Audio Embeddings | 0.3440 | 0.4000 | 0.1794 | Verified Real |
+  | **Baseline Estimator (SVM)** | 35-dim Pitch Class & Chroma | 0.6067 | 0.6000 | 0.2003 | Verified Real |
+  | **Hybrid Late Fusion** | 35-dim Musical + 1536-dim MERT | **0.7400** | **0.7667** | **0.1808** | **Verified Real** |
+- **Conclusion**: Validates the central research thesis. Combining domain tonic-relative pitch distributions with deep acoustic representations delivers an absolute **+13.3% F1 gain over the baseline** and **+39.6% F1 gain over MERT alone**.
+- **Status**: Completed & Verified. Checkpoint saved to `artifacts/checkpoints/hybrid_hindustani_model.pt`. Report: `reports/hybrid_fusion_hindustani_report.md`.
 
 ---
 
-## Experiment 4: Empirical Raga Reference Representations (Corpus Centroids)
+### Experiment 4: Empirical Raga Reference Centroids
 - **Method**: Extracted 12-bin tonic-relative Pitch Class Distribution centroids across all 360 training performances in the real Hindustani dataset.
-- **Results**:
-  - Empirical centroids capture the exact modal signatures of the 10 ragas (e.g. Malkauns `S-g-M-d-n`, Todi `S-r-g-M'-d-N`, Yaman `S-R-G-M'-P-D-N`).
-  - Integrated into `RagaPrototypeRegistry` to power Bhattacharyya affinity and cosine distance in `MelodicSimilarityEngine`.
-- **Status**: Implemented and verified in `src/raga_intelligence/similarity/prototypes.py`.
+- **Results**: Captured empirical modal signatures for all 10 canonical ragas (e.g. Malkauns `S-g-M-d-n`, Todi `S-r-g-M'-d-N`, Yaman `S-R-G-M'-P-D-N`). Integrated into `RagaPrototypeRegistry` to power Bhattacharyya affinity in `MelodicSimilarityEngine`.
+- **Status**: Completed & Verified in `src/raga_intelligence/similarity/prototypes.py`.
 
 ---
 
-## Experiment 5: Cross-Genre Melodic Similarity & Calibrated Abstention
-- **Hypothesis**: Multi-criterion gate combining spectral flatness (> 0.15), voiced ratio (< 0.15), and peak similarity score (< 0.40) reliably detects unpitched noise, speech, and atonal percussion without suppressing legitimate modal melodies.
+### Experiment 5: Cross-Genre Melodic Similarity & Calibrated Abstention
+- **Hypothesis**: Multi-criterion gate combining spectral flatness (> 0.15), voiced frame ratio (< 0.15), and peak similarity score (< 0.40) reliably detects unpitched noise, speech, and atonal percussion without suppressing legitimate modal melodies.
 - **Cross-Genre Evaluation Matrix**:
   | Test Track | Genre | Expected Raga Resemblance | Top Predicted Match | Similarity Score | Confidence | Abstention Status |
   | :--- | :--- | :--- | :--- | :---: | :--- | :---: |
@@ -99,11 +142,88 @@ The experimental protocol follows an evidence-driven progression:
   | **Bollywood (Yaman Ballad)** | Indian Film / Bollywood | `Yaman` | **Yaman** | `0.852` | High | No |
   | **Western Pop (Major Pentatonic)** | Western Pop / Folk | `Bhoopali` | **Bhoopali** | `0.918` | High | No |
   | **Western Blues (Minor Pentatonic)** | Western Blues / Rock | `Malkauns` | **Malkauns** | `0.953` | High | No |
-  | **Atonal Noise Control** | Unpitched Control | `Abstain` | **None** | `0.000` | N/A | Yes (Correct) |
-- **Key Musicological Insights**:
-  1. **Bollywood / Film Music**: High similarity achieved on modal scale alignments with explicit swara evidence.
-  2. **Western Pop**: Major pentatonic melodies naturally map to Raga *Bhoopali* (`S R G P D`), illustrating cross-cultural modal equivalence.
-  3. **Western Blues**: Minor pentatonic contours map to Raga *Malkauns* (`S g M d n`), reflecting shared pitch intervals without false assertions of classical improvisation.
-  4. **Abstention Gate**: Atonal noise triggers immediate rejection (`spectral flatness 0.56 > 0.15`), preventing spurious raga attribution.
-- **Status**: Verified in CLI runner `scripts/evaluate_cross_genre.py` and documented in `reports/cross_genre_evaluation.md`.
+  | **Atonal Noise Control** | Unpitched Control | `Abstain` | **None** | `0.000` | N/A | **Yes (Correct)** |
+- **Status**: Completed & Verified in CLI runner `scripts/evaluate_cross_genre.py` and documented in `reports/cross_genre_evaluation.md`.
 
+---
+
+### Experiment 6: Phase 2.1 — Scientific Evaluation Framework & Multi-Seed Benchmarks
+- **Objective**: Establish a rigorous, reproducible, group-isolated evaluation protocol with expanded statistical metrics, cluster bootstrap confidence intervals, feature ablation, and automated error diagnostics.
+- **Protocol**:
+  - **Dataset**: Hindustani classical audio collection (390 clips across 10 canonical ragas).
+  - **Group Isolation**: Group-based partitioning on performance/recording ID to guarantee 0% data leakage across 82 unique performances.
+  - **Multi-Seed Testing**: Evaluated across 3 deterministic random seeds (`[42, 123, 999]`) on strictly identical held-out test partitions.
+  - **Statistical Resampling**: 1,000 cluster bootstrap draws at the performance/performer level (never treating non-independent audio chunks as i.i.d.).
+- **Consolidated Multi-Seed Benchmark Results**:
+  | Model Architecture | Macro-F1 (Mean ± Std) | Accuracy (Mean ± Std) | Weighted-F1 | Log Loss | Brier Score | ECE |
+  | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+  | **Handcrafted (SVM)** | `0.4663 ± 0.0000` | `0.4667 ± 0.0000` | `0.4663` | `3.9909` | `1.2032` | `0.4282` |
+  | **Handcrafted (Random Forest)** | `0.4664 ± 0.0398` | `0.4778 ± 0.0416` | `0.4664` | `5.0702` | `1.0270` | `0.2443` |
+  | **Handcrafted (Logistic Regression)** | `0.6488 ± 0.0000` | `0.7333 ± 0.0000` | `0.6488` | `7.9233` | `1.4922` | `0.6791` |
+  | **Frozen MERT (95M)** | `0.2751 ± 0.0287` | `0.3778 ± 0.0314` | `0.2751` | `2.1511` | `0.8229` | `0.1179` |
+  | **Hybrid (Pitch + MERT)** | `0.7022 ± 0.0412` | `0.7222 ± 0.0314` | `0.7022` | `0.9758` | `0.4516` | `0.1737` |
+
+- **Primary Seed 95% Cluster Bootstrap Confidence Intervals**:
+  - **Hybrid Late Fusion**:
+    - Accuracy: `0.7667` (95% CI: `[0.5667, 0.9333]`, Std: `0.0959`)
+    - Macro-F1: `0.7603` (95% CI: `[0.3399, 0.6868]`, Std: `0.0927`)
+    - Brier Score: `0.4450` (95% CI: `[0.2338, 0.6900]`, Std: `0.1184`)
+  - **Handcrafted SVM**:
+    - Accuracy: `0.4667` (95% CI: `[0.2667, 0.6342]`, Std: `0.0963`)
+    - Macro-F1: `0.4663` (95% CI: `[0.1853, 0.4591]`, Std: `0.0719`)
+    - Brier Score: `1.1951` (95% CI: `[1.0139, 1.3656]`, Std: `0.0942`)
+
+- **Feature Group Ablation Summary**:
+  | Feature Group | Dims | Accuracy | Macro-F1 | Delta Macro-F1 | Log Loss | Brier Score |
+  | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+  | **all_handcrafted_35** | 35 | `0.4667` | `0.4663` | `0.0000 (ref)` | `3.9826` | `1.1951` |
+  | **pcd** | 12 | `0.4000` | `0.3667` | `-0.0997` | `3.9090` | `1.2287` |
+  | **chroma** | 12 | `0.3667` | `0.3044` | `-0.1620` | `3.5526` | `1.1830` |
+  | **pitch_combined** | 24 | `0.4667` | `0.4806` | `+0.0142` | `4.0496` | `1.2607` |
+  | **spectral** | 10 | `0.1333` | `0.1333` | `-0.3330` | `2.9106` | `1.0470` |
+  | **voiced** | 1 | `0.1000` | `0.0187` | `-0.4476` | `2.3392` | `0.9091` |
+  | **spectral_and_voiced** | 11 | `0.1333` | `0.1333` | `-0.3330` | `2.9014` | `1.0510` |
+  | **mert_embeddings** | 1536 | `0.5000` | `0.4112` | `-0.0552` | `3.4537` | `1.2039` |
+  | **hybrid_all** | 1571 | `0.4667` | `0.3512` | `-0.1151` | `3.5249` | `1.2182` |
+
+- **Key Musicological Error Analysis Findings**:
+  - **Bhoopali vs. Deshkar**: Confused due to identical pentatonic pitch sets (`S R G P D`). Static PCDs cannot separate them without temporal melodic contours (*chalan*) and register emphasis.
+  - **Darbari Kanada vs. Deshkar**: In short excerpts, slow andolans and glides on komal Ga/Dha can appear unvoiced or obscured, producing false positive Deshkar predictions.
+  - **Acoustic Quality Correlation**: Lower voiced frames exhibit slightly elevated misclassification risk, confirming the need for confidence calibration and abstention.
+- **Status**: Completed & Verified. Automated execution script `scripts/run_scientific_evaluation.py`, complete report in `reports/scientific_evaluation_report.md`, and 30 run logs stored in `artifacts/experiments/`.
+
+---
+
+## 3. Invalidated & Superseded Historical Experiments
+
+### Historical Experiment: Synthetic Random-Embedding Fallback (Invalidated)
+- **Context**: In early scaffold code (prior to Prompt 1 fix), `train_hybrid_pipeline()` contained the following fallback when MERT cache files were not found:
+  ```python
+  # INVALID / PLACEHOLDER IMPLEMENTATION:
+  rng = np.random.default_rng(42)
+  E_train = torch.tensor(rng.standard_normal((len(X_train), mert_dim)), dtype=torch.float32)
+  E_test = torch.tensor(rng.standard_normal((len(X_test), mert_dim)), dtype=torch.float32)
+  ```
+- **Why Invalid**: Gaussian noise vectors are completely uncorrelated with the audio signal. Models trained under this condition did not measure MERT representation capability; their metrics reflected training a regularized projection head on pure noise.
+- **Status**: **INVALIDATED / REMOVED**. Replaced in Prompt 1 and Prompt 2 with mandatory, validated extraction of real MERT embeddings with explicit failure upon missing audio or model errors.
+
+---
+
+## 4. Methodological Limitations: Small Held-Out Test Sets
+
+The held-out test partition in the Hindustani Raag dataset contains **30 recordings** (exactly 3 clips per canonical raga). The implications of this test set size must be explicitly understood:
+
+1. **Granularity & Variance**: Each individual test clip accounts for $1/3 \approx 33.3\%$ of the per-class recall for that raga, and $1/30 \approx 3.33\%$ of the overall accuracy. A single misclassification shifts the per-class metric substantially.
+2. **Confidence Intervals**: With $N=30$ and an observed accuracy of $76.67\%$, the 95% Wilson score confidence interval spans approximately $[59.1\%, 88.2\%]$. While the margin over random baseline ($10.0\%$) is statistically significant ($p < 10^{-6}$), differences between adjacent model variants require caution.
+3. **Generalization Beyond Cohort**: Although 0% recording and performer leakage is strictly enforced across the 82 performers, testing on broader, more diverse corpora (e.g., Saraga, CompMusic Dunya) with hundreds of unseen performers is necessary before claiming general Hindustani production readiness.
+
+---
+
+## 5. Planned Experiments (Roadmap)
+
+- **Experiment 6: End-to-End Fine-Tuning of MERT Layers**:
+  Unfreeze the top 2 transformer layers of `MERT-v1-95M` with low learning rate ($10^{-5}$) and gradient checkpointing to adapt representations directly to Indian microtonal ornamentation.
+- **Experiment 7: Sequential Transition & Melodic Motif (*Pakad*) Modeling**:
+  Train a temporal sequence model (BiLSTM / Transformer encoder) over frame-level pitch sequences to capture characteristic ascending/descending phrases (*chalan* / *pakad*) and distinguish raga pairs with identical pitch sets (e.g., *Bhoopali* vs. *Deshkar*, *Bhairav* vs. *Kalingada*).
+- **Experiment 8: Multi-Dataset 50-Raga Benchmark**:
+  Scale the evaluation corpus from 10 canonical ragas to 50 ragas using the complete Saraga Hindustani collection and CompMusic datasets with automated tonic and segmentation annotation.

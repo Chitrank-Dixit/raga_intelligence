@@ -18,8 +18,10 @@ class HealthResponse(BaseModel):
 
 class ReadyResponse(BaseModel):
     ready: bool = True
+    active_inference_backend: str = "melodic_similarity_prototypes"
     models_loaded: List[str]
     supported_ragas_count: int
+    details: Optional[str] = None
 
 
 class RagaDetail(BaseModel):
@@ -43,6 +45,9 @@ class MatchItemSchema(BaseModel):
     raga_name: str
     similarity_score: float
     confidence_level: str
+    resemblance_band: Optional[str] = None
+    is_calibrated_probability: bool = False
+    calibrated_probability: Optional[float] = None
     thhat: str
     vadi: str
     samvadi: str

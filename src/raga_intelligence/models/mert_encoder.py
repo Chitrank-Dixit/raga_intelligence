@@ -31,12 +31,14 @@ class MERTFeatureExtractor(nn.Module):
     def __init__(
         self,
         model_name: str = "m-a-p/MERT-v1-95M",
+        model_revision: str = "main",
         pooling_type: Literal["mean", "max", "mean_max_concat"] = "mean_max_concat",
         device: Optional[torch.device] = None,
         freeze: bool = True,
     ):
         super().__init__()
         self.model_name = model_name
+        self.model_revision = model_revision
         self.pooling_type = pooling_type
         self.device = device or settings.get_torch_device()
         self.freeze = freeze
@@ -50,14 +52,16 @@ class MERTFeatureExtractor(nn.Module):
         if self._is_loaded:
             return
 
-        logger.info(f"Loading MERT model '{self.model_name}' on device '{self.device}'...")
+        logger.info(f"Loading MERT model '{self.model_name}' (revision: '{self.model_revision}') on device '{self.device}'...")
         try:
             self.processor = AutoFeatureExtractor.from_pretrained(
                 self.model_name,
+                revision=self.model_revision,
                 trust_remote_code=True,
             )
             self.model = AutoModel.from_pretrained(
                 self.model_name,
+                revision=self.model_revision,
                 trust_remote_code=True,
             )
             self.model.to(self.device)
@@ -74,24 +78,56 @@ class MERTFeatureExtractor(nn.Module):
             logger.error(f"Failed to load MERT model from Hugging Face: {e}")
             raise
 
-    def pool_frames(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def pool_frames(
+        self,
+        hidden_states: torch.Tensor,
+        frame_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         """
-        Pools frame-level representations across time dimension (dim=1).
-        
+        Pools frame-level representations across time dimension (dim=1),
+        strictly excluding padded frames when frame_mask is provided.
+
         Args:
             hidden_states: (Batch, Time, HiddenDim)
-            
+            frame_mask: Optional binary mask (Batch, Time) where 1 indicates valid audio
+                and 0 indicates padded frames.
+
         Returns:
             Pooled tensor: (Batch, HiddenDim) or (Batch, 2 * HiddenDim)
         """
+        if frame_mask is not None:
+            mask = frame_mask.unsqueeze(-1).to(device=hidden_states.device)
+            mask_bool = mask.bool()
+            mask_float = mask.float()
+            counts = mask_float.sum(dim=1).clamp(min=1.0)
+        else:
+            mask_bool = None
+            mask_float = None
+            counts = None
+
         if self.pooling_type == "mean":
+            if mask_float is not None:
+                return (hidden_states * mask_float).sum(dim=1) / counts
             return torch.mean(hidden_states, dim=1)
+
         elif self.pooling_type == "max":
+            if mask_bool is not None:
+                masked_states = hidden_states.masked_fill(~mask_bool, float("-inf"))
+                max_val = torch.max(masked_states, dim=1)[0]
+                return torch.where(torch.isneginf(max_val), torch.zeros_like(max_val), max_val)
             return torch.max(hidden_states, dim=1)[0]
+
         elif self.pooling_type == "mean_max_concat":
-            mean_pooled = torch.mean(hidden_states, dim=1)
-            max_pooled = torch.max(hidden_states, dim=1)[0]
+            if mask_float is not None and mask_bool is not None:
+                mean_pooled = (hidden_states * mask_float).sum(dim=1) / counts
+                masked_states = hidden_states.masked_fill(~mask_bool, float("-inf"))
+                max_pooled = torch.max(masked_states, dim=1)[0]
+                max_pooled = torch.where(torch.isneginf(max_pooled), torch.zeros_like(max_pooled), max_pooled)
+            else:
+                mean_pooled = torch.mean(hidden_states, dim=1)
+                max_pooled = torch.max(hidden_states, dim=1)[0]
             return torch.cat([mean_pooled, max_pooled], dim=-1)
+
         else:
             raise ValueError(f"Unknown pooling type: {self.pooling_type}")
 
@@ -130,7 +166,7 @@ class MERTFeatureExtractor(nn.Module):
         sample_rate: int = 24000,
         batch_size: int = 8,
     ) -> torch.Tensor:
-        """Extracts embeddings for a batch of segments."""
+        """Extracts embeddings for a batch of segments excluding padded frames from pooling."""
         if not self._is_loaded:
             self.load_model()
 
@@ -147,10 +183,21 @@ class MERTFeatureExtractor(nn.Module):
                 padding=True,
             )
             input_values = inputs["input_values"].to(self.device)
+            raw_attention_mask = inputs.get("attention_mask")
+            attention_mask = raw_attention_mask.to(self.device) if raw_attention_mask is not None else None
 
             with torch.no_grad():
-                outputs = self.model(input_values)
-                pooled = self.pool_frames(outputs.last_hidden_state)
+                outputs = self.model(input_values, attention_mask=attention_mask)
+                last_hidden = outputs.last_hidden_state
+
+                # Derive frame-level attention mask matching transformer hidden states
+                frame_mask = None
+                if attention_mask is not None and hasattr(self.model, "_get_feature_vector_attention_mask"):
+                    frame_mask = self.model._get_feature_vector_attention_mask(
+                        last_hidden.shape[1], attention_mask
+                    )
+
+                pooled = self.pool_frames(last_hidden, frame_mask=frame_mask)
                 embeddings.append(pooled.cpu())
 
         return torch.cat(embeddings, dim=0)

@@ -1,0 +1,78 @@
+{
+  "run_id": "frozen_mert_head_20261102_194703_618d4c11",
+  "experiment_name": "Frozen MERT Head",
+  "timestamp": "2026-11-02T19:47:03.609674+00:00",
+  "code_version": "4d12f09ddaa933ebc11448b9b89bd8fe2c526e54",
+  "seed": 999,
+  "model_name": "Frozen MERT (95M)",
+  "model_architecture": "MERTClassifierHead(Linear(1536->128)->GELU->Linear(128->10))",
+  "hyperparameters": {
+    "epochs": 25,
+    "lr": 0.001,
+    "weight_decay": 0.01
+  },
+  "feature_config": {
+    "type": "mert_embeddings",
+    "dim": 1536
+  },
+  "dataset_name": "HindustaniRaagSmall",
+  "dataset_split_info": {},
+  "metrics": {
+    "accuracy": 0.4,
+    "macro_f1": 0.3133,
+    "weighted_f1": 0.3133,
+    "multiclass_log_loss": 2.1675,
+    "brier_score": 0.8192,
+    "expected_calibration_error": 0.1295,
+    "confidence_intervals": {
+      "accuracy": {
+        "ci_lower": 0.1667,
+        "ci_upper": 0.6333,
+        "mean": 0.4016,
+        "std": 0.1226
+      },
+      "macro_f1": {
+        "ci_lower": 0.0952,
+        "ci_upper": 0.36,
+        "mean": 0.2295,
+        "std": 0.0664
+      },
+      "weighted_f1": {
+        "ci_lower": 0.14,
+        "ci_upper": 0.621,
+        "mean": 0.3689,
+        "std": 0.1244
+      },
+      "brier_score": {
+        "ci_lower": 0.6287,
+        "ci_upper": 1.0086,
+        "mean": 0.8201,
+        "std": 0.0978
+      },
+      "log_loss": {
+        "ci_lower": 1.5303,
+        "ci_upper": 2.8678,
+        "mean": 2.1692,
+        "std": 0.3406
+      },
+      "ece": {
+        "ci_lower": 0.1126,
+        "ci_upper": 0.3204,
+        "mean": 0.206,
+        "std": 0.0558
+      }
+    }
+  },
+  "system_environment": {
+    "os": "Windows-11-10.0.26200-SP0",
+    "python_version": "3.12.6",
+    "torch_version": "2.15.0+cpu",
+    "torchaudio_version": "N/A",
+    "transformers_version": "5.22.1",
+    "librosa_version": "1.0.0",
+    "sklearn_version": "1.9.1",
+    "cuda_available": false,
+    "device_name": "None (CPU)"
+  },
+  "notes": "Phase 2.1 Scientific Benchmark"
+}

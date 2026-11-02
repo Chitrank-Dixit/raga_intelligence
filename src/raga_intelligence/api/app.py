@@ -5,19 +5,34 @@ FastAPI application factory and middleware configuration.
 from __future__ import annotations
 
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from raga_intelligence import __version__
-from raga_intelligence.api.routes import router
+from raga_intelligence.api.routes import router, sanitize_error_detail
 from raga_intelligence.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+class RequestCorrelationMiddleware(BaseHTTPMiddleware):
+    """
+    Ensures every incoming request has a unique correlation ID for end-to-end tracing.
+    Accepts X-Request-ID if provided by client/proxy; otherwise generates a UUID4.
+    """
+    async def dispatch(self, request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
 
 
 @asynccontextmanager
@@ -44,13 +59,44 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # 1. Request correlation tracing
+    app.add_middleware(RequestCorrelationMiddleware)
+
+    # 2. Configurable CORS security (replaces insecure wildcard)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=settings.cors_allowed_origins,
+        allow_credentials=settings.cors_allow_credentials,
+        allow_methods=settings.cors_allowed_methods,
+        allow_headers=settings.cors_allowed_headers,
     )
+
+    # 3. Global Exception Handling (Prevents traceback & path exposure)
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+        request_id = getattr(request.state, "request_id", "unknown")
+        detail = sanitize_error_detail(str(exc.detail)) if isinstance(exc.detail, str) else exc.detail
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "detail": detail,
+                "request_id": request_id,
+            },
+            headers={"X-Request-ID": request_id},
+        )
+
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        request_id = getattr(request.state, "request_id", "unknown")
+        logger.error(f"Internal server error [request_id={request_id}]: {exc}", exc_info=True)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "detail": "An internal server error occurred while processing the request.",
+                "request_id": request_id,
+            },
+            headers={"X-Request-ID": request_id},
+        )
 
     app.include_router(router)
 

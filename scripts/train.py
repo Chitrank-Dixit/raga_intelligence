@@ -32,9 +32,9 @@ def main():
     parser = argparse.ArgumentParser(description="Train raga recognition models.")
     parser.add_argument(
         "--model",
-        choices=["baseline", "hybrid", "mert_frozen"],
+        choices=["baseline", "mert", "hybrid", "mert_frozen"],
         default="baseline",
-        help="Model architecture to train",
+        help="Model architecture to train (baseline: handcrafted features; mert: frozen MERT encoder + classifier; hybrid: late fusion)",
     )
     parser.add_argument(
         "--dataset",
@@ -55,10 +55,56 @@ def main():
         help="Baseline classifier algorithm",
     )
     parser.add_argument(
+        "--mert-model",
+        type=str,
+        default="m-a-p/MERT-v1-95M",
+        help="Hugging Face model identifier for MERT",
+    )
+    parser.add_argument(
+        "--mert-revision",
+        type=str,
+        default="main",
+        help="Model revision (branch/tag/commit) for MERT",
+    )
+    parser.add_argument(
+        "--pooling-type",
+        choices=["mean", "max", "mean_max_concat"],
+        default="mean_max_concat",
+        help="Temporal pooling strategy for MERT frame-level hidden states",
+    )
+    parser.add_argument(
         "--epochs",
         type=int,
-        default=10,
+        default=25,
         help="Number of epochs for neural training",
+    )
+    parser.add_argument(
+        "--device",
+        choices=["auto", "cuda", "cpu"],
+        default="auto",
+        help="Target compute execution device (auto, cuda, cpu)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=16,
+        help="Batch size for training and embedding extraction",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for repeatable training and initialization",
+    )
+    parser.add_argument(
+        "--include-melodic",
+        action="store_true",
+        help="Include 40-dim sequential melodic and ornamentation features (extends baseline to 75 dims)",
+    )
+    parser.add_argument(
+        "--force-refresh-cache",
+        action="store_true",
+        help="Force re-extraction of features and embeddings, bypassing cache",
     )
     parser.add_argument(
         "--output-dir",
@@ -106,57 +152,109 @@ def main():
 
     # Validate split integrity
     validation = manifest.validate_splits()
+    if not validation["valid_no_recording_leakage"]:
+        raise ValueError(
+            f"Fatal dataset leakage: recordings found in multiple splits: {validation['leaked_recordings']}"
+        )
+    if not validation["valid_no_performance_leakage"]:
+        raise ValueError(
+            f"Fatal dataset leakage: performances found in multiple splits: {validation['leaked_performances']}"
+        )
+    if not validation["valid_no_performer_leakage"]:
+        raise ValueError(
+            f"Fatal dataset leakage: performers found in multiple splits: {validation['leaked_performers']}"
+        )
+
+    summary = validation["split_summary"]
     logger.info(
-        f"Manifest validation: No recording leakage = {validation['valid_no_recording_leakage']} "
-        f"(Train: {validation['train_recordings_count']}, Val: {validation['val_recordings_count']}, "
-        f"Test: {validation['test_recordings_count']})"
+        f"Manifest split validation PASSED: "
+        f"Recordings: {summary['recordings_count']['train']} train / {summary['recordings_count']['val']} val / {summary['recordings_count']['test']} test. "
+        f"Performers: {summary['performers_count']['train']} train / {summary['performers_count']['val']} val / {summary['performers_count']['test']} test."
     )
+    if not validation.get("performer_metadata_complete", True):
+        logger.warning(
+            f"Performer metadata is incomplete ({validation.get('unknown_performer_count', 0)} items have Unknown performer). "
+            "Performer-level leakage cannot be fully guaranteed for those unannotated items."
+        )
+
+    # Normalize model selection and resolve device diagnostics
+    model_choice = "mert" if args.model in ("mert", "mert_frozen") else args.model
+    from raga_intelligence.config import verify_execution_device
+    target_device, dev_diag = verify_execution_device(args.device)
+    logger.info(f"Target compute execution device: {target_device} ({dev_diag['diagnostic_reason']})")
 
     # 2. Train selected model
-    cache_path = Path("./artifacts/cache") / f"{args.dataset}_features.npz"
+    feature_suffix = "melodic_features" if args.include_melodic else "features"
+    cache_path = Path("./artifacts/cache") / f"{args.dataset}_{feature_suffix}.npz"
     mert_cache_path = Path("./artifacts/cache") / f"{args.dataset}_mert_embeddings.npz"
 
-    if args.model == "baseline":
-        save_path = out_dir / f"baseline_{args.classifier_type}.joblib"
-        logger.info(f"Training baseline {args.classifier_type} classifier...")
+    if model_choice == "baseline":
+        model_name_tag = f"baseline_{args.classifier_type}_melodic" if args.include_melodic else f"baseline_{args.classifier_type}"
+        save_path = out_dir / f"{model_name_tag}.joblib"
+        logger.info(
+            f"Training baseline {args.classifier_type} classifier "
+            f"(include_melodic: {args.include_melodic}, dims: {75 if args.include_melodic else 35})..."
+        )
         model, metrics = train_baseline_pipeline(
             manifest=manifest,
             classifier_type=args.classifier_type,
             save_path=save_path,
             cache_path=cache_path,
+            include_melodic_features=args.include_melodic,
+            force_refresh=args.force_refresh_cache,
         )
-        report_file = rep_dir / f"baseline_{args.classifier_type}_{args.dataset}_report.md"
+        report_file = rep_dir / f"{model_name_tag}_{args.dataset}_report.md"
 
-    elif args.model == "mert_frozen":
-        save_path = out_dir / f"mert_frozen_{args.dataset}_model.pt"
-        logger.info(f"Training frozen MERT classification head for {args.epochs} epochs...")
+    elif model_choice == "mert":
+        save_path = out_dir / f"mert_{args.dataset}_model.pt"
+        logger.info(
+            f"Training frozen MERT classification head for {args.epochs} epochs "
+            f"(model: {args.mert_model}, pooling: {args.pooling_type}, seed: {args.seed}, device: {target_device})..."
+        )
         model, metrics = train_mert_pipeline(
             manifest=manifest,
             save_path=save_path,
             cache_path=mert_cache_path,
             epochs=args.epochs,
+            batch_size=args.batch_size,
+            seed=args.seed,
+            model_name=args.mert_model,
+            model_revision=args.mert_revision,
+            pooling_type=args.pooling_type,
+            force_refresh=args.force_refresh_cache,
+            device=target_device,
         )
-        report_file = rep_dir / f"mert_frozen_{args.dataset}_report.md"
+        report_file = rep_dir / f"mert_{args.dataset}_report.md"
 
-    elif args.model == "hybrid":
+    elif model_choice == "hybrid":
         save_path = out_dir / f"hybrid_{args.dataset}_model.pt"
-        logger.info(f"Training hybrid fusion model for {args.epochs} epochs...")
+        logger.info(
+            f"Training hybrid fusion model for {args.epochs} epochs "
+            f"(mert_model: {args.mert_model}, pooling: {args.pooling_type}, seed: {args.seed}, device: {target_device})..."
+        )
         model, metrics = train_hybrid_pipeline(
             manifest=manifest,
             save_path=save_path,
             cache_path=cache_path,
             mert_cache_path=mert_cache_path,
             epochs=args.epochs,
+            batch_size=args.batch_size,
+            seed=args.seed,
+            model_name=args.mert_model,
+            model_revision=args.mert_revision,
+            pooling_type=args.pooling_type,
+            force_refresh=args.force_refresh_cache,
+            device=target_device,
         )
         report_file = rep_dir / f"hybrid_fusion_{args.dataset}_report.md"
 
     # 3. Generate report
     report_md = generate_markdown_report(
         metrics=metrics,
-        experiment_name=f"{args.model.upper()} ({args.dataset.capitalize()} Dataset)",
+        experiment_name=f"{model_choice.upper()} ({args.dataset.capitalize()} Dataset)",
         dataset_name=args.dataset.capitalize(),
         notes=(
-            f"Trained with {args.model} architecture. "
+            f"Trained with {model_choice} architecture. "
             f"Checkpoint persisted to `{save_path}`."
         ),
     )

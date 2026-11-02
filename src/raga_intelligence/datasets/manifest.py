@@ -20,6 +20,7 @@ class DatasetItem(BaseModel):
     raga: str
     tradition: str = "Hindustani"
     performer: str = "Unknown"
+    performance_id: Optional[str] = None
     duration_sec: float = Field(ge=0.0)
     sample_rate: int = Field(gt=0)
     tonic_hz: Optional[float] = None
@@ -35,28 +36,81 @@ class DatasetManifest(BaseModel):
     def add_item(self, item: DatasetItem) -> None:
         self.items.append(item)
 
-    def validate_splits(self) -> Dict[str, bool | List[str]]:
+    def validate_splits(self) -> Dict[str, bool | List[str] | int | Dict]:
         """
-        Verifies that no recording or performance is shared across splits (preventing data leakage).
-        Also inspects performer overlap across splits.
+        Verifies that no recording, performance, or performer crosses dataset split boundaries.
+        Returns detailed leakage diagnostics and a split distribution summary.
         """
-        train_ids = {it.recording_id for it in self.items if it.split == "train"}
-        val_ids = {it.recording_id for it in self.items if it.split == "val"}
-        test_ids = {it.recording_id for it in self.items if it.split == "test"}
+        train_items = [it for it in self.items if it.split == "train"]
+        val_items = [it for it in self.items if it.split == "val"]
+        test_items = [it for it in self.items if it.split == "test"]
 
-        rec_leakage = list((train_ids & val_ids) | (train_ids & test_ids) | (val_ids & test_ids))
+        # 1. Recording-level checks
+        train_ids = {it.recording_id for it in train_items}
+        val_ids = {it.recording_id for it in val_items}
+        test_ids = {it.recording_id for it in test_items}
+        rec_leakage = (train_ids & val_ids) | (train_ids & test_ids) | (val_ids & test_ids)
 
-        train_performers = {it.performer for it in self.items if it.split == "train" and it.performer != "Unknown"}
-        test_performers = {it.performer for it in self.items if it.split == "test" and it.performer != "Unknown"}
-        performer_overlap = list(train_performers & test_performers)
+        # 2. Performance-level checks
+        train_perfs = {it.performance_id or it.recording_id for it in train_items}
+        val_perfs = {it.performance_id or it.recording_id for it in val_items}
+        test_perfs = {it.performance_id or it.recording_id for it in test_items}
+        perf_leakage = (train_perfs & val_perfs) | (train_perfs & test_perfs) | (val_perfs & test_perfs)
+
+        # 3. Performer-level checks
+        train_performers = {it.performer for it in train_items if it.performer not in ("Unknown", "unknown", None, "")}
+        val_performers = {it.performer for it in val_items if it.performer not in ("Unknown", "unknown", None, "")}
+        test_performers = {it.performer for it in test_items if it.performer not in ("Unknown", "unknown", None, "")}
+        performer_leakage = (train_performers & val_performers) | (train_performers & test_performers) | (val_performers & test_performers)
+
+        # 4. Metadata completeness check
+        unknown_performer_count = sum(1 for it in self.items if it.performer in ("Unknown", "unknown", None, ""))
+        unknown_performance_count = sum(1 for it in self.items if not it.performance_id)
+        performer_metadata_complete = (unknown_performer_count == 0)
+        performance_metadata_complete = (unknown_performance_count == 0)
+
+        split_summary = {
+            "recordings_count": {
+                "train": len(train_ids),
+                "val": len(val_ids),
+                "test": len(test_ids),
+                "total": len(self.items),
+            },
+            "performances_count": {
+                "train": len(train_perfs),
+                "val": len(val_perfs),
+                "test": len(test_perfs),
+                "total": len(train_perfs | val_perfs | test_perfs),
+            },
+            "performers_count": {
+                "train": len(train_performers),
+                "val": len(val_performers),
+                "test": len(test_performers),
+                "total": len(train_performers | val_performers | test_performers),
+            },
+            "raga_distribution": self.get_class_counts(),
+            "performer_metadata_complete": performer_metadata_complete,
+            "performance_metadata_complete": performance_metadata_complete,
+            "unknown_performer_count": unknown_performer_count,
+            "unknown_performance_count": unknown_performance_count,
+        }
 
         return {
             "valid_no_recording_leakage": len(rec_leakage) == 0,
-            "leaked_recordings": rec_leakage,
+            "valid_no_performance_leakage": len(perf_leakage) == 0,
+            "valid_no_performer_leakage": len(performer_leakage) == 0,
+            "leaked_recordings": sorted(list(rec_leakage)),
+            "leaked_performances": sorted(list(perf_leakage)),
+            "leaked_performers": sorted(list(performer_leakage)),
+            "performer_metadata_complete": performer_metadata_complete,
+            "performance_metadata_complete": performance_metadata_complete,
+            "unknown_performer_count": unknown_performer_count,
+            "unknown_performance_count": unknown_performance_count,
             "train_recordings_count": len(train_ids),
             "val_recordings_count": len(val_ids),
             "test_recordings_count": len(test_ids),
-            "performer_overlap_in_test": performer_overlap,
+            "performer_overlap_in_test": sorted(list(train_performers & test_performers)),
+            "split_summary": split_summary,
         }
 
     def get_class_counts(self) -> Dict[str, Dict[str, int]]:

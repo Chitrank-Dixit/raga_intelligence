@@ -1,0 +1,77 @@
+{
+  "run_id": "baseline_svm_20261102_194734_ab1799a9",
+  "experiment_name": "Baseline SVM",
+  "timestamp": "2026-11-02T19:47:34.775185+00:00",
+  "code_version": "4d12f09ddaa933ebc11448b9b89bd8fe2c526e54",
+  "seed": 123,
+  "model_name": "Baseline SVM",
+  "model_architecture": "SVC(kernel=rbf, C=10.0)",
+  "hyperparameters": {
+    "C": 10.0,
+    "kernel": "rbf"
+  },
+  "feature_config": {
+    "type": "handcrafted_35",
+    "dim": 35
+  },
+  "dataset_name": "HindustaniRaagSmall",
+  "dataset_split_info": {},
+  "metrics": {
+    "accuracy": 0.4667,
+    "macro_f1": 0.4663,
+    "weighted_f1": 0.4663,
+    "multiclass_log_loss": 4.0387,
+    "brier_score": 1.2141,
+    "expected_calibration_error": 0.4359,
+    "confidence_intervals": {
+      "accuracy": {
+        "ci_lower": 0.3,
+        "ci_upper": 0.6667,
+        "mean": 0.4695,
+        "std": 0.0936
+      },
+      "macro_f1": {
+        "ci_lower": 0.1864,
+        "ci_upper": 0.4573,
+        "mean": 0.3256,
+        "std": 0.0684
+      },
+      "weighted_f1": {
+        "ci_lower": 0.303,
+        "ci_upper": 0.7243,
+        "mean": 0.5084,
+        "std": 0.1088
+      },
+      "brier_score": {
+        "ci_lower": 1.0473,
+        "ci_upper": 1.3979,
+        "mean": 1.2185,
+        "std": 0.0889
+      },
+      "log_loss": {
+        "ci_lower": 3.1756,
+        "ci_upper": 4.9401,
+        "mean": 4.0559,
+        "std": 0.4587
+      },
+      "ece": {
+        "ci_lower": 0.3612,
+        "ci_upper": 0.5825,
+        "mean": 0.4633,
+        "std": 0.0552
+      }
+    }
+  },
+  "system_environment": {
+    "os": "Windows-11-10.0.26200-SP0",
+    "python_version": "3.12.6",
+    "torch_version": "2.15.0+cpu",
+    "torchaudio_version": "N/A",
+    "transformers_version": "5.22.1",
+    "librosa_version": "1.0.0",
+    "sklearn_version": "1.9.1",
+    "cuda_available": false,
+    "device_name": "None (CPU)"
+  },
+  "notes": "Phase 2.1 Scientific Benchmark"
+}

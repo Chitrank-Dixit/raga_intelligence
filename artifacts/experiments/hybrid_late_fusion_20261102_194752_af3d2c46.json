@@ -1,0 +1,79 @@
+{
+  "run_id": "hybrid_late_fusion_20261102_194752_af3d2c46",
+  "experiment_name": "Hybrid Late Fusion",
+  "timestamp": "2026-11-02T19:47:52.473714+00:00",
+  "code_version": "4d12f09ddaa933ebc11448b9b89bd8fe2c526e54",
+  "seed": 999,
+  "model_name": "Hybrid (Pitch + MERT)",
+  "model_architecture": "HybridRagaClassifier(DualStream->GELU->LateFusion)",
+  "hyperparameters": {
+    "epochs": 25,
+    "lr": 0.001,
+    "weight_decay": 0.01
+  },
+  "feature_config": {
+    "type": "hybrid",
+    "musical_dim": 35,
+    "mert_dim": 1536
+  },
+  "dataset_name": "HindustaniRaagSmall",
+  "dataset_split_info": {},
+  "metrics": {
+    "accuracy": 0.7,
+    "macro_f1": 0.6755,
+    "weighted_f1": 0.6755,
+    "multiclass_log_loss": 1.0634,
+    "brier_score": 0.4749,
+    "expected_calibration_error": 0.1636,
+    "confidence_intervals": {
+      "accuracy": {
+        "ci_lower": 0.5,
+        "ci_upper": 0.8667,
+        "mean": 0.6992,
+        "std": 0.098
+      },
+      "macro_f1": {
+        "ci_lower": 0.28,
+        "ci_upper": 0.6195,
+        "mean": 0.4548,
+        "std": 0.0859
+      },
+      "weighted_f1": {
+        "ci_lower": 0.479,
+        "ci_upper": 0.8969,
+        "mean": 0.7109,
+        "std": 0.1062
+      },
+      "brier_score": {
+        "ci_lower": 0.2655,
+        "ci_upper": 0.7182,
+        "mean": 0.4775,
+        "std": 0.1175
+      },
+      "log_loss": {
+        "ci_lower": 0.5496,
+        "ci_upper": 1.7028,
+        "mean": 1.07,
+        "std": 0.3012
+      },
+      "ece": {
+        "ci_lower": 0.1311,
+        "ci_upper": 0.3323,
+        "mean": 0.2162,
+        "std": 0.0507
+      }
+    }
+  },
+  "system_environment": {
+    "os": "Windows-11-10.0.26200-SP0",
+    "python_version": "3.12.6",
+    "torch_version": "2.15.0+cpu",
+    "torchaudio_version": "N/A",
+    "transformers_version": "5.22.1",
+    "librosa_version": "1.0.0",
+    "sklearn_version": "1.9.1",
+    "cuda_available": false,
+    "device_name": "None (CPU)"
+  },
+  "notes": "Phase 2.1 Scientific Benchmark"
+}

@@ -1,0 +1,77 @@
+{
+  "run_id": "baseline_random_forest_20261102_194654_99e48f19",
+  "experiment_name": "Baseline Random Forest",
+  "timestamp": "2026-11-02T19:46:54.399031+00:00",
+  "code_version": "4d12f09ddaa933ebc11448b9b89bd8fe2c526e54",
+  "seed": 123,
+  "model_name": "Random Forest",
+  "model_architecture": "RandomForestClassifier(n_estimators=100, max_depth=12)",
+  "hyperparameters": {
+    "n_estimators": 100,
+    "max_depth": 12
+  },
+  "feature_config": {
+    "type": "handcrafted_35",
+    "dim": 35
+  },
+  "dataset_name": "HindustaniRaagSmall",
+  "dataset_split_info": {},
+  "metrics": {
+    "accuracy": 0.4333,
+    "macro_f1": 0.4352,
+    "weighted_f1": 0.4352,
+    "multiclass_log_loss": 4.0782,
+    "brier_score": 1.0299,
+    "expected_calibration_error": 0.2434,
+    "confidence_intervals": {
+      "accuracy": {
+        "ci_lower": 0.2667,
+        "ci_upper": 0.6333,
+        "mean": 0.4334,
+        "std": 0.0928
+      },
+      "macro_f1": {
+        "ci_lower": 0.175,
+        "ci_upper": 0.41,
+        "mean": 0.301,
+        "std": 0.0612
+      },
+      "weighted_f1": {
+        "ci_lower": 0.2833,
+        "ci_upper": 0.6797,
+        "mean": 0.4696,
+        "std": 0.0989
+      },
+      "brier_score": {
+        "ci_lower": 0.9286,
+        "ci_upper": 1.1292,
+        "mean": 1.0329,
+        "std": 0.0528
+      },
+      "log_loss": {
+        "ci_lower": 2.6195,
+        "ci_upper": 6.4278,
+        "mean": 4.1024,
+        "std": 1.0818
+      },
+      "ece": {
+        "ci_lower": 0.1579,
+        "ci_upper": 0.3407,
+        "mean": 0.2537,
+        "std": 0.05
+      }
+    }
+  },
+  "system_environment": {
+    "os": "Windows-11-10.0.26200-SP0",
+    "python_version": "3.12.6",
+    "torch_version": "2.15.0+cpu",
+    "torchaudio_version": "N/A",
+    "transformers_version": "5.22.1",
+    "librosa_version": "1.0.0",
+    "sklearn_version": "1.9.1",
+    "cuda_available": false,
+    "device_name": "None (CPU)"
+  },
+  "notes": "Phase 2.1 Scientific Benchmark"
+}

@@ -84,16 +84,24 @@ class HybridRagaClassifier(nn.Module):
             logits = self.forward(musical_feat, mert_feat)
             return F.softmax(logits, dim=-1)
 
-    def save_checkpoint(self, path: Path | str, meta: Optional[Dict] = None) -> None:
+    def save_checkpoint(
+        self,
+        path: Path | str,
+        meta: Optional[Dict] = None,
+        extra_meta: Optional[Dict] = None,
+    ) -> None:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
+        merged_meta = dict(meta or {})
+        if extra_meta:
+            merged_meta.update(extra_meta)
         checkpoint = {
             "state_dict": self.state_dict(),
             "musical_dim": self.musical_dim,
             "mert_dim": self.mert_dim,
             "num_classes": self.num_classes,
             "class_names": self.class_names,
-            "metadata": meta or {},
+            "metadata": merged_meta,
         }
         torch.save(checkpoint, p)
         logger.info(f"Saved Hybrid classifier checkpoint to {p}")
