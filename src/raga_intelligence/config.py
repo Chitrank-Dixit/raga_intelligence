@@ -178,6 +178,20 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8000, alias="API_PORT")
     min_tonic_hz: float = Field(default=50.0, alias="MIN_TONIC_HZ", description="Minimum physically plausible singing tonic frequency in Hz")
     max_tonic_hz: float = Field(default=1000.0, alias="MAX_TONIC_HZ", description="Maximum physically plausible singing tonic frequency in Hz")
+    max_concurrent_inferences: int = Field(
+        default=4,
+        ge=1,
+        le=64,
+        alias="MAX_CONCURRENT_INFERENCES",
+        description="Maximum concurrent audio inference/classification jobs allowed before 503 rejection."
+    )
+    inference_retry_after_sec: int = Field(
+        default=2,
+        ge=1,
+        le=60,
+        alias="INFERENCE_RETRY_AFTER_SEC",
+        description="Retry-After header value in seconds returned when inference capacity is saturated."
+    )
 
     # CORS Configuration
     cors_allowed_origins: List[str] = Field(

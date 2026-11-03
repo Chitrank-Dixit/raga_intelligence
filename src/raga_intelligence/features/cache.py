@@ -34,18 +34,38 @@ class CacheValidationReport:
     recording_ids_test: List[str]
     recording_ids_val: List[str]
     errors: List[str] = field(default_factory=list)
+    feat_cache_path: Optional[str] = None
+    feat_cache_sha256: Optional[str] = None
+    mert_cache_path: Optional[str] = None
+    mert_cache_sha256: Optional[str] = None
+
+
+def compute_file_sha256(path: Path | str, chunk_size: int = 65536) -> str:
+    """
+    Computes a deterministic cryptographic SHA-256 hex digest of a file's raw bytes.
+    Used for tamper-evident provenance tracking of exact cache and audio files.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"File not found for SHA-256 computation: {p}")
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        while chunk := f.read(chunk_size):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def compute_manifest_content_fingerprint(
     items: List[DatasetItem],
     include_file_stats: bool = True,
+    include_audio_content: bool = True,
 ) -> str:
     """
     Computes a deterministic cryptographic fingerprint of a dataset manifest.
 
     Incorporates:
       - Recording ID, split, canonical raga, tonic.
-      - File path, file size, and modification time (mtime) if file exists.
+      - Per-recording audio SHA-256 (if present) or file stats (size, mtime) or raw content hash.
     Any alteration of audio content or split assignment will invalidate this fingerprint.
     """
     sorted_items = sorted(items, key=lambda x: (x.recording_id, x.split, x.file_path))
@@ -54,12 +74,20 @@ def compute_manifest_content_fingerprint(
     for it in sorted_items:
         file_stat_desc = "missing"
         p = Path(it.file_path)
-        if include_file_stats and p.exists():
-            try:
-                st = p.stat()
-                file_stat_desc = f"sz:{st.st_size}:mt:{int(st.st_mtime)}"
-            except Exception:
-                file_stat_desc = "unreadable"
+        if p.exists():
+            if include_audio_content and getattr(it, "audio_sha256", None):
+                file_stat_desc = f"sha:{it.audio_sha256}"
+            elif include_audio_content:
+                try:
+                    file_stat_desc = f"sha:{compute_file_sha256(p)}"
+                except Exception:
+                    file_stat_desc = "unreadable"
+            elif include_file_stats:
+                try:
+                    st = p.stat()
+                    file_stat_desc = f"sz:{st.st_size}:mt:{int(st.st_mtime)}"
+                except Exception:
+                    file_stat_desc = "unreadable"
 
         desc = f"{it.recording_id}:{it.split}:{it.raga}:{it.tonic_hz}:{it.file_path}:{file_stat_desc}"
         descriptors.append(desc)
@@ -86,6 +114,8 @@ def validate_cache_manifest_provenance(
     feat_cache_data: Dict[str, Any] | np.lib.npyio.NpzFile,
     mert_cache_data: Optional[Dict[str, Any] | np.lib.npyio.NpzFile] = None,
     raise_on_error: bool = True,
+    feat_cache_path: Optional[Path | str] = None,
+    mert_cache_path: Optional[Path | str] = None,
 ) -> CacheValidationReport:
     """
     Validates exact provenance, ordering, labels, splits, and fingerprints between
@@ -254,6 +284,19 @@ def validate_cache_manifest_provenance(
         else:
             errors.append("MERT cache missing 'splits_test' array")
 
+    # Compute file SHA-256 for physical cache files if paths are provided
+    feat_sha: Optional[str] = None
+    if feat_cache_path is not None:
+        p_feat = Path(feat_cache_path)
+        if p_feat.exists():
+            feat_sha = compute_file_sha256(p_feat)
+
+    mert_sha: Optional[str] = None
+    if mert_cache_path is not None:
+        p_mert = Path(mert_cache_path)
+        if p_mert.exists():
+            mert_sha = compute_file_sha256(p_mert)
+
     is_valid = len(errors) == 0
     report = CacheValidationReport(
         is_valid=is_valid,
@@ -266,6 +309,10 @@ def validate_cache_manifest_provenance(
         recording_ids_test=feat_test_ids,
         recording_ids_val=manifest_val_ids,
         errors=errors,
+        feat_cache_path=str(feat_cache_path) if feat_cache_path else None,
+        feat_cache_sha256=feat_sha,
+        mert_cache_path=str(mert_cache_path) if mert_cache_path else None,
+        mert_cache_sha256=mert_sha,
     )
 
     if not is_valid and raise_on_error:

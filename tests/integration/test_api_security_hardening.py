@@ -22,6 +22,7 @@ import soundfile as sf
 from fastapi.testclient import TestClient
 
 from raga_intelligence.api.app import app
+from raga_intelligence.api.routes import inference_limiter
 from raga_intelligence.config import settings
 
 
@@ -142,4 +143,88 @@ def test_concurrent_requests(client: TestClient):
 
         for f in concurrent.futures.as_completed(analyze_futures):
             assert f.result() == 200
+
+
+def test_capacity_limiter_503_backpressure(client: TestClient):
+    """
+    When concurrent inference requests exceed MAX_CONCURRENT_INFERENCES,
+    the API must predictably reject requests with HTTP 503 and Retry-After header.
+    """
+    wav_bytes = make_test_wav(duration=1.0)
+    files = {"audio_file": ("test_limit.wav", wav_bytes, "audio/wav")}
+
+    # Configure limiter to max 1 concurrent inference
+    orig_max = inference_limiter.max_concurrent
+    orig_retry = inference_limiter.retry_after_sec
+    inference_limiter.configure(max_concurrent=1, retry_after_sec=5)
+
+    try:
+        # Simulate active inference job holding the single permit
+        assert inference_limiter.try_acquire() is True
+        assert inference_limiter.active_count == 1
+
+        # Second request must be rejected with 503 and Retry-After: 5
+        res = client.post("/analyze", files=files, data={"top_k": 2})
+        assert res.status_code == 503
+        assert res.headers.get("Retry-After") == "5"
+        assert "capacity is currently saturated" in res.json()["detail"]
+
+        # Release slot
+        inference_limiter.release()
+        assert inference_limiter.active_count == 0
+
+        # Subsequent request must succeed
+        res2 = client.post("/analyze", files={"audio_file": ("test_limit.wav", wav_bytes, "audio/wav")}, data={"top_k": 2})
+        assert res2.status_code == 200
+
+    finally:
+        inference_limiter.configure(max_concurrent=orig_max, retry_after_sec=orig_retry)
+        inference_limiter.reset()
+
+
+def test_cleanup_on_decoder_failure(client: TestClient):
+    """
+    Verify temporary file cleanup when uploaded file has valid WAV header
+    but corrupt/unparseable body causing audio decoder failure.
+    """
+    temp_dir = Path(tempfile.gettempdir())
+    files_before = set(temp_dir.glob("*.wav"))
+
+    # Valid WAV container header (RIFF....WAVE) but corrupt PCM payload
+    corrupt_wav = (
+        b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00"
+        b"\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
+    )
+    files = {"audio_file": ("corrupt_decoder.wav", corrupt_wav, "audio/wav")}
+    res = client.post("/analyze", files=files)
+    assert res.status_code in (400, 422, 500)
+
+    files_after = set(temp_dir.glob("*.wav"))
+    new_files = files_after - files_before
+    assert len(new_files) == 0
+    assert inference_limiter.active_count == 0
+
+
+@pytest.mark.asyncio
+async def test_cleanup_on_request_cancellation():
+    """
+    Verify that if an inference task is cancelled mid-execution,
+    the capacity limiter releases its slot and temporary files are unlinked.
+    """
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+    from fastapi import UploadFile
+    from raga_intelligence.api.routes import analyze_audio_endpoint
+
+    mock_upload = MagicMock(spec=UploadFile)
+    mock_upload.filename = "cancel_test.wav"
+    mock_upload.read = AsyncMock(side_effect=asyncio.CancelledError("Client disconnected"))
+
+    initial_active = inference_limiter.active_count
+
+    with pytest.raises(asyncio.CancelledError):
+        await analyze_audio_endpoint(audio_file=mock_upload, tonic_hz=220.0, top_k=3)
+
+    # Limiter count must have been returned to initial state
+    assert inference_limiter.active_count == initial_active
 

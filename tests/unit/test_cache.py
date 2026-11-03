@@ -13,11 +13,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from raga_intelligence.datasets.manifest import DatasetItem
+from raga_intelligence.datasets.manifest import DatasetItem, DatasetManifest
 from raga_intelligence.features.cache import (
     FeatureCacheManager,
+    compute_file_sha256,
     compute_manifest_content_fingerprint,
+    validate_cache_manifest_provenance,
 )
+from raga_intelligence.features.schema import FeatureSchema
 
 
 @pytest.fixture
@@ -166,3 +169,82 @@ def test_atomic_write_leaves_no_orphaned_temp_files(tmp_path: Path) -> None:
     # Verify no .tmp.npz files remain in parent dir
     tmp_files = list(cache_path.parent.glob("*.tmp.npz"))
     assert len(tmp_files) == 0
+
+
+def test_compute_file_sha256_deterministic(tmp_path: Path) -> None:
+    test_file = tmp_path / "cache_data.npz"
+    test_file.write_bytes(b"deterministic_cache_payload_bytes_12345")
+    h1 = compute_file_sha256(test_file)
+    h2 = compute_file_sha256(test_file)
+    assert h1 == h2
+    assert len(h1) == 64
+
+
+def test_replacing_cache_contents_changes_file_sha256(tmp_path: Path) -> None:
+    cache_path = tmp_path / "feat_cache.npz"
+    arrays_v1 = {"X": np.ones((5, 10), dtype=np.float32)}
+    meta_v1 = {"version": "1.0"}
+    FeatureCacheManager.save_atomic_cache(cache_path, arrays_v1, meta_v1)
+    sha_orig = compute_file_sha256(cache_path)
+
+    # Replace cache contents
+    arrays_v2 = {"X": np.zeros((5, 10), dtype=np.float32)}
+    meta_v2 = {"version": "2.0"}
+    FeatureCacheManager.save_atomic_cache(cache_path, arrays_v2, meta_v2)
+    sha_replaced = compute_file_sha256(cache_path)
+
+    assert sha_orig != sha_replaced
+
+
+def test_validate_cache_manifest_provenance_records_paths_and_hashes(tmp_path: Path) -> None:
+    cache_path = tmp_path / "validated_cache.npz"
+    manifest = DatasetManifest(items=[
+        DatasetItem(
+            recording_id="rec_A",
+            source="test",
+            file_path="/dummy/a.wav",
+            raga="Bhairav",
+            split="train",
+            duration_sec=10.0,
+            sample_rate=24000,
+        ),
+        DatasetItem(
+            recording_id="rec_B",
+            source="test",
+            file_path="/dummy/b.wav",
+            raga="Bhairav",
+            split="test",
+            duration_sec=10.0,
+            sample_rate=24000,
+        ),
+    ])
+
+    expected_fp = manifest.compute_dataset_fingerprint()
+    arrays = {
+        "X_train": np.ones((1, 35)),
+        "y_train": np.array(["Bhairav"]),
+        "recording_ids_train": np.array(["rec_A"]),
+        "splits_train": np.array(["train"]),
+        "X_test": np.ones((1, 35)),
+        "y_test": np.array(["Bhairav"]),
+        "recording_ids_test": np.array(["rec_B"]),
+        "splits_test": np.array(["test"]),
+    }
+    meta = {
+        "dataset_fingerprint": expected_fp,
+        "feature_schema_version": FeatureSchema.SCHEMA_VERSION,
+    }
+    FeatureCacheManager.save_atomic_cache(cache_path, arrays, meta)
+    expected_sha = compute_file_sha256(cache_path)
+
+    with np.load(cache_path, allow_pickle=True) as cache_data:
+        report = validate_cache_manifest_provenance(
+            manifest=manifest,
+            feat_cache_data=cache_data,
+            feat_cache_path=cache_path,
+        )
+
+    assert report.is_valid is True
+    assert report.feat_cache_path == str(cache_path)
+    assert report.feat_cache_sha256 == expected_sha
+

@@ -30,10 +30,17 @@ class GroupingDiagnostic:
     is_fully_partitionable: bool
     is_isolation_verifiable: bool
     limitations: List[str] = field(default_factory=list)
+    impossible_coverage_ragas: List[str] = field(default_factory=list)
+    entangled_components: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def ragas_with_insufficient_groups(self) -> List[str]:
         return self.untestable_ragas
+
+
+class InfeasiblePartitionError(ValueError):
+    """Raised when strict group isolation prevents valid class representation across splits."""
+    pass
 
 
 class GroupAwarePartitioner:
@@ -106,13 +113,75 @@ class GroupAwarePartitioner:
                     f"or omitting it from training."
                 )
 
+        # Multi-raga component and bipartite graph analysis
+        adj: Dict[str, Set[str]] = defaultdict(set)
+        for g, ragas in group_to_ragas.items():
+            if not g.startswith("__unknown_"):
+                for r in ragas:
+                    adj[f"g:{g}"].add(f"r:{r}")
+                    adj[f"r:{r}"].add(f"g:{g}")
+
+        visited: Set[str] = set()
+        entangled_components: List[Dict[str, Any]] = []
+        impossible_coverage_ragas: List[str] = list(untestable_ragas)
+
+        for node in sorted(list(adj.keys())):
+            if node in visited:
+                continue
+            comp_nodes = []
+            queue = [node]
+            visited.add(node)
+            while queue:
+                curr = queue.pop(0)
+                comp_nodes.append(curr)
+                for neighbor in sorted(list(adj[curr])):
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        queue.append(neighbor)
+
+            comp_ragas = sorted([n[2:] for n in comp_nodes if n.startswith("r:")])
+            comp_groups = sorted([n[2:] for n in comp_nodes if n.startswith("g:")])
+
+            if len(comp_ragas) > 1:
+                entangled_components.append({
+                    "ragas": comp_ragas,
+                    "groups": comp_groups,
+                    "num_ragas": len(comp_ragas),
+                    "num_groups": len(comp_groups),
+                })
+                # Check whether comp_groups can be partitioned into 2 non-empty subsets
+                # such that every raga in comp_ragas is covered in both subsets
+                n_g = len(comp_groups)
+                if n_g < 2:
+                    for r in comp_ragas:
+                        if r not in impossible_coverage_ragas:
+                            impossible_coverage_ragas.append(r)
+                elif n_g <= 14:
+                    feasible_bipartition = False
+                    for mask in range(1, (1 << (n_g - 1))):
+                        s1 = {comp_groups[i] for i in range(n_g) if (mask & (1 << i))}
+                        s2 = {comp_groups[i] for i in range(n_g) if not (mask & (1 << i))}
+                        r_s1 = {r for g in s1 for r in group_to_ragas[g]}
+                        r_s2 = {r for g in s2 for r in group_to_ragas[g]}
+                        if all(r in r_s1 and r in r_s2 for r in comp_ragas):
+                            feasible_bipartition = True
+                            break
+                    if not feasible_bipartition:
+                        for r in comp_ragas:
+                            if r not in impossible_coverage_ragas:
+                                impossible_coverage_ragas.append(r)
+                        limitations.append(
+                            f"Entangled component with ragas {comp_ragas} and {group_col}s {comp_groups} cannot achieve "
+                            f"dual-split representation for all classes under strict {group_col} isolation."
+                        )
+
         if multi_raga_groups:
             limitations.append(
                 f"{len(multi_raga_groups)} {group_col}(s) are associated with multiple ragas. "
                 f"Assigning any multi-raga group to a split constrains all its associated ragas to that split."
             )
 
-        is_partitionable = len(untestable_ragas) == 0
+        is_partitionable = (len(untestable_ragas) == 0) and (len(impossible_coverage_ragas) == 0)
         is_verifiable = unknown_items_count == 0
 
         return GroupingDiagnostic(
@@ -126,6 +195,8 @@ class GroupAwarePartitioner:
             is_fully_partitionable=is_partitionable,
             is_isolation_verifiable=is_verifiable,
             limitations=limitations,
+            impossible_coverage_ragas=sorted(list(set(impossible_coverage_ragas))),
+            entangled_components=entangled_components,
         )
 
     @classmethod
@@ -136,6 +207,7 @@ class GroupAwarePartitioner:
         test_ratio: float = 0.20,
         val_ratio: float = 0.0,
         seed: int = 42,
+        strict_coverage: bool = False,
     ) -> Tuple[DatasetManifest, GroupingDiagnostic]:
         """
         Creates a new DatasetManifest with globally consistent group-aware split assignments.
@@ -274,6 +346,37 @@ class GroupAwarePartitioner:
         if group_col == "performer" and not leakage_check["valid_no_performer_leakage"]:
             raise ValueError(f"Performer leakage detected: {leakage_check['leaked_performers']}")
 
+        # 6. Audit class coverage across splits
+        raga_counts = new_manifest.get_class_counts()
+        missing_train = [r for r, c in raga_counts.items() if c["train"] == 0]
+        missing_test = [r for r, c in raga_counts.items() if c["test"] == 0]
+        coverage_violations = sorted(list(set(missing_train + missing_test)))
+
+        if coverage_violations:
+            for r in coverage_violations:
+                if r not in diagnostic.impossible_coverage_ragas:
+                    diagnostic.impossible_coverage_ragas.append(r)
+                missing_splits: List[str] = []
+                if r in missing_train:
+                    missing_splits.append("train")
+                if r in missing_test:
+                    missing_splits.append("test")
+                lim_text = (
+                    f"Impossible class coverage: Raga '{r}' has 0 samples in {' and '.join(missing_splits)} split "
+                    f"due to strict {group_col} isolation constraints."
+                )
+                if lim_text not in diagnostic.limitations:
+                    diagnostic.limitations.append(lim_text)
+
+            diagnostic.is_fully_partitionable = False
+
+            if strict_coverage:
+                raise InfeasiblePartitionError(
+                    f"Cannot construct valid group-aware partition with full class coverage under strict {group_col} isolation. "
+                    f"Ragas missing from a split: {coverage_violations}. "
+                    f"Audit details: {diagnostic.limitations}"
+                )
+
         return new_manifest, diagnostic
 
     @classmethod
@@ -284,6 +387,7 @@ class GroupAwarePartitioner:
         group_col: Literal["performance_id", "performer"] = "performance_id",
         test_ratio: float = 0.20,
         val_ratio: float = 0.0,
+        strict_coverage: bool = False,
     ) -> Dict[int, DatasetManifest]:
         """Generates consistent, group-isolated dataset splits across multiple random seeds."""
         splits_by_seed: Dict[int, DatasetManifest] = {}
@@ -294,6 +398,7 @@ class GroupAwarePartitioner:
                 test_ratio=test_ratio,
                 val_ratio=val_ratio,
                 seed=s,
+                strict_coverage=strict_coverage,
             )
             splits_by_seed[s] = split_m
         return splits_by_seed
@@ -306,6 +411,7 @@ class GroupAwarePartitioner:
         test_ratio: float = 0.20,
         val_ratio: float = 0.0,
         seed: int = 42,
+        strict_coverage: bool = False,
     ) -> Tuple[DatasetManifest, DatasetManifest, DatasetManifest]:
         """Convenience method returning (train_manifest, val_manifest, test_manifest)."""
         full_m, _ = cls.create_group_aware_split(
@@ -314,6 +420,7 @@ class GroupAwarePartitioner:
             test_ratio=test_ratio,
             val_ratio=val_ratio,
             seed=seed,
+            strict_coverage=strict_coverage,
         )
         train_m = DatasetManifest(items=[it for it in full_m.items if it.split == "train"])
         val_m = DatasetManifest(items=[it for it in full_m.items if it.split == "val"])

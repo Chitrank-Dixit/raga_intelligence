@@ -85,13 +85,16 @@ def create_app() -> FastAPI:
     async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
         request_id = getattr(request.state, "request_id", "unknown")
         detail = sanitize_error_detail(str(exc.detail)) if isinstance(exc.detail, str) else exc.detail
+        headers = {"X-Request-ID": request_id}
+        if exc.headers:
+            headers.update(exc.headers)
         return JSONResponse(
             status_code=exc.status_code,
             content={
                 "detail": detail,
                 "request_id": request_id,
             },
-            headers={"X-Request-ID": request_id},
+            headers=headers,
         )
 
     @app.exception_handler(Exception)

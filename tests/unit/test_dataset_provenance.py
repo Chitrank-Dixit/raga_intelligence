@@ -13,7 +13,11 @@ import numpy as np
 import pytest
 
 from raga_intelligence.datasets.manifest import DatasetItem, DatasetManifest
-from raga_intelligence.datasets.partitioning import GroupAwarePartitioner, GroupingDiagnostic
+from raga_intelligence.datasets.partitioning import (
+    GroupAwarePartitioner,
+    GroupingDiagnostic,
+    InfeasiblePartitionError,
+)
 from raga_intelligence.features.cache import (
     CacheValidationReport,
     FeatureCacheManager,
@@ -263,3 +267,155 @@ def test_cache_manifest_provenance_success_and_failure_modes(tmp_path: Path):
     bad_mert["y_test"] = np.array(["WrongLabel"] * len(test_items))
     with pytest.raises(ValueError, match="MERT cache test labels do not match"):
         validate_cache_manifest_provenance(manifest, valid_feat, bad_mert, raise_on_error=True)
+
+
+def test_metadata_vs_audio_content_fingerprint_distinction(tmp_path: Path):
+    """
+    Demonstrates and verifies the architectural distinction:
+    - Metadata fingerprint guarantees label, tonic, performer, and split consistency.
+    - Audio-content fingerprint guarantees raw audio bytes have not been altered or corrupted.
+    """
+    audio1 = tmp_path / "rec1.wav"
+    audio2 = tmp_path / "rec2.wav"
+    audio1.write_bytes(b"RIFF" + b"\x00" * 50)
+    audio2.write_bytes(b"RIFF" + b"\x01" * 50)
+
+    manifest = DatasetManifest(items=[
+        DatasetItem(
+            recording_id="rec_1",
+            source="Test",
+            file_path=str(audio1),
+            raga="Bhairav",
+            split="train",
+            performer="Artist_A",
+            duration_sec=10.0,
+            sample_rate=24000,
+            tonic_hz=220.0,
+        ),
+        DatasetItem(
+            recording_id="rec_2",
+            source="Test",
+            file_path=str(audio2),
+            raga="Yaman",
+            split="test",
+            performer="Artist_B",
+            duration_sec=10.0,
+            sample_rate=24000,
+            tonic_hz=140.0,
+        ),
+    ])
+
+    manifest.populate_audio_hashes()
+
+    meta_fp_before = manifest.compute_metadata_fingerprint()
+    audio_fp_before = manifest.compute_audio_content_fingerprint()
+    dataset_fp_before = manifest.compute_dataset_fingerprint()
+
+    # Modify raw audio file on disk without changing any manifest metadata
+    audio1.write_bytes(b"RIFF" + b"\xFF" * 100)
+
+    # 1. Metadata fingerprint MUST remain invariant (metadata unchanged)
+    meta_fp_after = manifest.compute_metadata_fingerprint()
+    assert meta_fp_before == meta_fp_after
+
+    # 2. Audio content fingerprint MUST change to reflect modified bytes
+    audio_fp_after = manifest.compute_audio_content_fingerprint(force_recompute=True)
+    assert audio_fp_before != audio_fp_after
+
+    # 3. Overall dataset fingerprint MUST change to invalidate downstream caches
+    dataset_fp_after = manifest.compute_dataset_fingerprint(force_recompute=True)
+    assert dataset_fp_before != dataset_fp_after
+
+
+def test_interconnected_multi_raga_performer_cycle_impossible_coverage():
+    """
+    Tests edge case: A 3-cycle of performers linking 3 ragas:
+      P1 -> {Bhairav, Yaman}
+      P2 -> {Yaman, Bhoopali}
+      P3 -> {Bhoopali, Bhairav}
+    Because each performer must be isolated to strictly ONE split, any 2-partition of {P1, P2, P3}
+    leaves at least one raga completely missing from one of the splits.
+    The partitioner must:
+    1. Identify the entangled component.
+    2. Explicitly flag the impossible class coverage.
+    3. Raise InfeasiblePartitionError if strict_coverage=True.
+    """
+    manifest = DatasetManifest()
+    manifest.add_item(DatasetItem(
+        recording_id="rec_1", source="Test", file_path="/f/1.wav",
+        raga="Bhairav", performer="P1", performance_id="P1", duration_sec=10.0, sample_rate=24000,
+    ))
+    manifest.add_item(DatasetItem(
+        recording_id="rec_2", source="Test", file_path="/f/2.wav",
+        raga="Yaman", performer="P1", performance_id="P1", duration_sec=10.0, sample_rate=24000,
+    ))
+    manifest.add_item(DatasetItem(
+        recording_id="rec_3", source="Test", file_path="/f/3.wav",
+        raga="Yaman", performer="P2", performance_id="P2", duration_sec=10.0, sample_rate=24000,
+    ))
+    manifest.add_item(DatasetItem(
+        recording_id="rec_4", source="Test", file_path="/f/4.wav",
+        raga="Bhoopali", performer="P2", performance_id="P2", duration_sec=10.0, sample_rate=24000,
+    ))
+    manifest.add_item(DatasetItem(
+        recording_id="rec_5", source="Test", file_path="/f/5.wav",
+        raga="Bhoopali", performer="P3", performance_id="P3", duration_sec=10.0, sample_rate=24000,
+    ))
+    manifest.add_item(DatasetItem(
+        recording_id="rec_6", source="Test", file_path="/f/6.wav",
+        raga="Bhairav", performer="P3", performance_id="P3", duration_sec=10.0, sample_rate=24000,
+    ))
+
+    # Audit detects entangled component
+    diag = GroupAwarePartitioner.audit_grouping(manifest, group_col="performer")
+    assert len(diag.entangled_components) == 1
+    assert diag.entangled_components[0]["num_ragas"] == 3
+    assert diag.entangled_components[0]["num_groups"] == 3
+    assert diag.is_fully_partitionable is False
+
+    # Lenient partitioning notes limitation explicitly
+    split_m, diag2 = GroupAwarePartitioner.create_group_aware_split(
+        manifest, group_col="performer", strict_coverage=False
+    )
+    assert len(diag2.impossible_coverage_ragas) > 0
+    assert any("Impossible class coverage" in lim for lim in diag2.limitations)
+
+    # Strict partitioning raises InfeasiblePartitionError
+    with pytest.raises(InfeasiblePartitionError, match="Cannot construct valid group-aware partition"):
+        GroupAwarePartitioner.create_group_aware_split(
+            manifest, group_col="performer", strict_coverage=True
+        )
+
+
+def test_global_split_consistency_across_seeds():
+    """
+    Tests that multi-seed split generation preserves global group isolation
+    with 0 recording, performance, and performer leakage across all seeds.
+    """
+    manifest = DatasetManifest()
+    # 4 performers, each singing 2 ragas
+    for p_idx in range(4):
+        p_name = f"Performer_{p_idx}"
+        for r_name in ["Bhairav", "Yaman"]:
+            manifest.add_item(DatasetItem(
+                recording_id=f"{p_name}_{r_name}",
+                source="Test",
+                file_path=f"/dummy/{p_name}_{r_name}.wav",
+                raga=r_name,
+                performer=p_name,
+                performance_id=p_name,
+                duration_sec=10.0,
+                sample_rate=24000,
+            ))
+
+    seeds = [101, 202, 303, 404]
+    multi_splits = GroupAwarePartitioner.generate_multi_seed_splits(
+        manifest, seeds=seeds, group_col="performer"
+    )
+
+    for s in seeds:
+        split_manifest = multi_splits[s]
+        audit = split_manifest.validate_splits()
+        assert audit["valid_no_recording_leakage"] is True
+        assert audit["valid_no_performer_leakage"] is True
+

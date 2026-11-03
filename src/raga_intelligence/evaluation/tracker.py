@@ -107,7 +107,7 @@ class ExperimentRecord:
     dataset_fingerprint: str = ""
     dataset_version: str = "1.0.0"
     recording_ids_per_split: Dict[str, List[str]] = field(default_factory=dict)
-    cache_fingerprints: Dict[str, str] = field(default_factory=dict)
+    cache_fingerprints: Dict[str, Any] = field(default_factory=dict)
     feature_schema_version: str = "1.0.0"
     mert_model_revision: str = "12af15fef9d0ac838c3f475bfbbf26d2060dd4f5"
     lockfile_hash: str = ""
@@ -137,7 +137,7 @@ class ExperimentTracker:
         dataset_fingerprint: Optional[str] = None,
         dataset_version: str = "1.0.0",
         recording_ids_per_split: Optional[Dict[str, List[str]]] = None,
-        cache_fingerprints: Optional[Dict[str, str]] = None,
+        cache_fingerprints: Optional[Dict[str, Any]] = None,
         feature_schema_version: Optional[str] = None,
         mert_model_revision: Optional[str] = None,
         notes: Optional[str] = None,

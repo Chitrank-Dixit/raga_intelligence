@@ -39,11 +39,16 @@ def generate_markdown_report(
 
     if metrics.n_groups is not None:
         lines.append(f"- **Independent Resampling Groups**: `{metrics.n_groups}`")
+        if metrics.n_groups < 15:
+            lines.append(
+                f"- **Statistical Limitation Warning**: Resampling group count (`n={metrics.n_groups}`) is small (<15). "
+                f"Cluster bootstrap coverage may be biased; interpret confidence intervals with caution."
+            )
 
     if metrics.confidence_intervals:
         lines.extend([
             "",
-            "### Statistical Confidence Intervals (95% Grouped Bootstrap)",
+            f"### Statistical Confidence Intervals (95% Grouped Bootstrap across {metrics.n_groups or 'N/A'} clusters)",
             "| Metric | Bootstrap Mean | Std Err | 95% CI Lower | 95% CI Upper |",
             "| :--- | :---: | :---: | :---: | :---: |",
         ])

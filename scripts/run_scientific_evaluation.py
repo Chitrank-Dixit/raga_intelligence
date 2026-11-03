@@ -26,7 +26,10 @@ from raga_intelligence.evaluation.error_analysis import (
 )
 from raga_intelligence.evaluation.reporting import generate_markdown_report
 from raga_intelligence.evaluation.tracker import ExperimentTracker
-from raga_intelligence.features.cache import validate_cache_manifest_provenance
+from raga_intelligence.features.cache import (
+    compute_file_sha256,
+    validate_cache_manifest_provenance,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -81,12 +84,17 @@ def main():
         manifest=manifest,
         feat_cache_data=feat_cache,
         mert_cache_data=mert_cache,
+        feat_cache_path=args.features_cache,
+        mert_cache_path=args.mert_cache,
         raise_on_error=True,
     )
     logger.info(
         f"Cache provenance successfully verified! Dataset fingerprint: {val_report.dataset_fingerprint[:16]}... "
         f"Train: {val_report.n_train}, Test: {val_report.n_test}"
     )
+
+    feat_cache_sha256 = val_report.feat_cache_sha256 or compute_file_sha256(args.features_cache)
+    mert_cache_sha256 = val_report.mert_cache_sha256 or compute_file_sha256(args.mert_cache)
 
     X_train = feat_cache["X_train"]
     y_train = feat_cache["y_train"]
@@ -108,7 +116,7 @@ def main():
 
     aggregated_models: List[AggregatedModelStats] = []
 
-    # Common provenance dictionary persisted for all runs
+    # Common provenance dictionary persisted for all runs with exact file hashes
     common_provenance = {
         "dataset_fingerprint": val_report.dataset_fingerprint,
         "dataset_version": "1.0.0",
@@ -117,8 +125,10 @@ def main():
             "test": val_report.recording_ids_test,
         },
         "cache_fingerprints": {
-            "features_cache": args.features_cache,
-            "mert_cache": args.mert_cache,
+            "features_cache_path": str(Path(args.features_cache).resolve()),
+            "features_cache_sha256": feat_cache_sha256,
+            "mert_cache_path": str(Path(args.mert_cache).resolve()),
+            "mert_cache_sha256": mert_cache_sha256,
         },
         "feature_schema_version": val_report.feature_schema_version,
         "mert_model_revision": settings.model.mert_model_revision,
@@ -376,16 +386,31 @@ def main():
         "",
         "## 2. Consolidated Model Comparison Benchmark",
         f"Comparison across Handcrafted Baselines (SVM, Random Forest, Logistic Regression), Frozen MERT, and Hybrid architectures. "
-        f"Statistics report Mean ± Standard Deviation across random seeds {args.seeds}.",
+        f"**Model Optimization Variability**: Reported as Mean ± Standard Deviation across random seeds {args.seeds} "
+        f"(reflects sensitivity to weight initialization and batch ordering; *note: seed standard deviation is not a confidence interval*).",
         "",
         ModelBenchmarkRunner.format_comparison_markdown_table(aggregated_models),
         "",
-        f"### Primary Seed ({primary_seed}) Statistical Confidence Intervals (95% Cluster Bootstrap)",
-        "Resampling performed over unique performance groups (10 clusters, 30 clips):",
+        f"### Primary Seed ({primary_seed}) Statistical Generalization Uncertainty (95% Cluster Bootstrap)",
+        f"Resampling performed over {len(set(test_groups))} unique performance groups ({len(test_items)} test clips). "
+        f"Quantifies generalization bounds to unseen performances/performers.",
+    ]
+
+    n_test_clusters = len(set(test_groups))
+    if n_test_clusters < 15:
+        rep_lines.extend([
+            "",
+            "> [!WARNING]",
+            f"> **Small-Sample Cluster Limitation**: The test partition contains {n_test_clusters} independent clusters (<15). "
+            f"Asymptotic cluster bootstrap coverage may exhibit downward bias; interpret confidence intervals with caution.",
+            "",
+        ])
+
+    rep_lines.extend([
         "",
         "| Architecture | Metric | Point Estimate | Bootstrap Mean | Std Err | 95% CI Lower | 95% CI Upper |",
         "| :--- | :--- | :---: | :---: | :---: | :---: | :---: |",
-    ]
+    ])
 
     for model_name, rep_m in [("Handcrafted SVM", svm_agg.representative_metrics), ("Frozen MERT", mert_agg.representative_metrics), ("Hybrid Late Fusion", hybrid_agg.representative_metrics)]:
         if rep_m.confidence_intervals:

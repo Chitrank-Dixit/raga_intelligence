@@ -47,7 +47,7 @@ class HindustaniDatasetAdapter(BaseDatasetAdapter):
         self.dataset_dir = Path(dataset_dir)
         self.metadata_file = self.dataset_dir / metadata_file if metadata_file else None
 
-    def build_manifest(self) -> DatasetManifest:
+    def build_manifest(self, compute_audio_hashes: bool = False) -> DatasetManifest:
         manifest = DatasetManifest()
         if not self.dataset_dir.exists():
             logger.error(f"Dataset directory '{self.dataset_dir}' does not exist.")
@@ -79,6 +79,18 @@ class HindustaniDatasetAdapter(BaseDatasetAdapter):
 
             split = "test" if "test_" in rel_path.lower() else "train"
 
+            audio_sha = None
+            if compute_audio_hashes:
+                import hashlib
+                try:
+                    h = hashlib.sha256()
+                    with open(full_audio_path, "rb") as af:
+                        while chunk := af.read(65536):
+                            h.update(chunk)
+                    audio_sha = h.hexdigest()
+                except Exception as e:
+                    logger.warning(f"Could not hash audio content for {full_audio_path}: {e}")
+
             item = DatasetItem(
                 recording_id=full_audio_path.stem,
                 source="HindustaniRaagDataset",
@@ -93,6 +105,7 @@ class HindustaniDatasetAdapter(BaseDatasetAdapter):
                 split=split,
                 license="CC-BY-NC-SA",
                 metadata={"thhat": CANONICAL_RAGAS[canonical_raga]["thhat"]},
+                audio_sha256=audio_sha,
             )
             manifest.add_item(item)
 

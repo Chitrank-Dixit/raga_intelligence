@@ -27,6 +27,7 @@ class DatasetItem(BaseModel):
     split: Literal["train", "val", "test"] = "train"
     license: str = "CC BY-NC-SA 4.0"
     metadata: Dict[str, str] = Field(default_factory=dict)
+    audio_sha256: Optional[str] = None
 
 
 class DatasetManifest(BaseModel):
@@ -132,12 +133,15 @@ class DatasetManifest(BaseModel):
             "split_summary": split_summary,
         }
 
-    def compute_dataset_fingerprint(self) -> str:
+    def compute_metadata_fingerprint(self) -> str:
         """
-        Computes a stable, deterministic SHA256 fingerprint of all dataset items.
+        Computes a stable, deterministic SHA-256 fingerprint strictly over dataset metadata.
         
-        Includes recording ID, split assignment, canonical raga, tonic, duration,
+        Guarantees that semantic annotations have not drifted:
+        recording ID, split assignment, canonical raga, tonic (Sa), duration,
         sample rate, performer, and performance identifiers.
+        
+        Does not require audio files to be present on disk.
         """
         import hashlib
         sorted_items = sorted(self.items, key=lambda x: (x.recording_id, x.split, x.file_path))
@@ -145,6 +149,82 @@ class DatasetManifest(BaseModel):
             f"{it.recording_id}:{it.split}:{it.raga}:{it.tonic_hz}:{it.performer}:{it.performance_id}:{it.duration_sec}:{it.sample_rate}"
             for it in sorted_items
         ]
+        return hashlib.sha256("|".join(descriptors).encode("utf-8")).hexdigest()
+
+    def populate_audio_hashes(self, force_recompute: bool = False) -> None:
+        """
+        Computes and records SHA-256 content hashes for all physical audio files in the manifest.
+        Mutates items in-place with their computed audio_sha256.
+        """
+        import hashlib
+        for it in self.items:
+            if it.audio_sha256 and not force_recompute:
+                continue
+            p = Path(it.file_path)
+            if p.exists():
+                h = hashlib.sha256()
+                with open(p, "rb") as f:
+                    while chunk := f.read(65536):
+                        h.update(chunk)
+                it.audio_sha256 = h.hexdigest()
+
+    def compute_audio_content_fingerprint(
+        self,
+        force_recompute: bool = False,
+        populate_missing: bool = False,
+    ) -> str:
+        """
+        Computes a cryptographic SHA-256 fingerprint over the actual audio content bytes
+        of all recordings in the manifest.
+        
+        Guarantees that audio recordings have not been modified, clipped, truncated,
+        or replaced on disk.
+        """
+        import hashlib
+        if force_recompute or populate_missing:
+            self.populate_audio_hashes(force_recompute=force_recompute)
+
+        sorted_items = sorted(self.items, key=lambda x: (x.recording_id, x.split, x.file_path))
+        descriptors: List[str] = []
+        for it in sorted_items:
+            h_val = it.audio_sha256
+            if (force_recompute or not h_val) and Path(it.file_path).exists():
+                try:
+                    h = hashlib.sha256()
+                    with open(it.file_path, "rb") as f:
+                        while chunk := f.read(65536):
+                            h.update(chunk)
+                    h_val = h.hexdigest()
+                    it.audio_sha256 = h_val
+                except Exception:
+                    h_val = "unreadable"
+            descriptors.append(f"{it.recording_id}:{h_val or 'none'}")
+
+        return hashlib.sha256("|".join(descriptors).encode("utf-8")).hexdigest()
+
+    def compute_dataset_fingerprint(
+        self,
+        include_audio_content: bool = True,
+        force_recompute: bool = False,
+    ) -> str:
+        """
+        Computes a stable, deterministic cryptographic fingerprint of all dataset items.
+        
+        Guarantees:
+        1. Metadata consistency (labels, splits, tonics, performers, durations).
+        2. Audio content integrity (audio file byte hashes when audio_sha256 is present).
+        """
+        import hashlib
+        if include_audio_content and force_recompute:
+            self.populate_audio_hashes(force_recompute=True)
+
+        sorted_items = sorted(self.items, key=lambda x: (x.recording_id, x.split, x.file_path))
+        descriptors = []
+        for it in sorted_items:
+            base = f"{it.recording_id}:{it.split}:{it.raga}:{it.tonic_hz}:{it.performer}:{it.performance_id}:{it.duration_sec}:{it.sample_rate}"
+            if include_audio_content and it.audio_sha256:
+                base += f":{it.audio_sha256}"
+            descriptors.append(base)
         return hashlib.sha256("|".join(descriptors).encode("utf-8")).hexdigest()
 
     def get_class_counts(self) -> Dict[str, Dict[str, int]]:

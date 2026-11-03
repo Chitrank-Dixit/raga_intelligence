@@ -4,6 +4,7 @@ FastAPI route definitions for health, models info, and audio analysis.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -31,6 +32,41 @@ router = APIRouter()
 
 # Global pipeline instance initialized on app startup
 pipeline: Optional[InferencePipeline] = None
+
+
+class InferenceCapacityLimiter:
+    """
+    Manages concurrent expensive audio inference load with immediate saturation
+    detection and predictable HTTP 503 backpressure.
+    """
+    def __init__(self, max_concurrent: int = 4, retry_after_sec: int = 2):
+        self.max_concurrent = max_concurrent
+        self.retry_after_sec = retry_after_sec
+        self.active_count = 0
+
+    def try_acquire(self) -> bool:
+        if self.active_count >= self.max_concurrent:
+            return False
+        self.active_count += 1
+        return True
+
+    def release(self) -> None:
+        if self.active_count > 0:
+            self.active_count -= 1
+
+    def configure(self, max_concurrent: int, retry_after_sec: Optional[int] = None) -> None:
+        self.max_concurrent = max_concurrent
+        if retry_after_sec is not None:
+            self.retry_after_sec = retry_after_sec
+
+    def reset(self) -> None:
+        self.active_count = 0
+
+
+inference_limiter = InferenceCapacityLimiter(
+    max_concurrent=settings.max_concurrent_inferences,
+    retry_after_sec=settings.inference_retry_after_sec,
+)
 
 
 def get_pipeline() -> InferencePipeline:
@@ -150,38 +186,54 @@ async def analyze_audio_endpoint(
     tonic_hz: Optional[float] = Form(None, description="Optional known tonic (Sa) in Hz"),
     top_k: int = Form(5, ge=1, le=10, description="Number of candidate ragas to return"),
 ) -> AnalysisResponse:
-    # 1. Validate parameters & file extension / mime
-    if tonic_hz is not None:
-        import math
-        if math.isnan(tonic_hz) or math.isinf(tonic_hz) or tonic_hz < settings.min_tonic_hz or tonic_hz > settings.max_tonic_hz:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"Tonic frequency ({tonic_hz} Hz) is invalid or outside the permitted safe range "
-                    f"[{settings.min_tonic_hz}, {settings.max_tonic_hz}] Hz."
-                ),
-            )
-
-    filename = audio_file.filename or "uploaded_audio"
-    allowed_extensions = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
-    file_ext = "." + filename.split(".")[-1].lower() if "." in filename else ""
-    if file_ext not in allowed_extensions:
+    # 1. Enforce concurrency limits and predictable backpressure
+    if not inference_limiter.try_acquire():
+        logger.warning(
+            f"Inference capacity saturated ({inference_limiter.active_count}/{inference_limiter.max_concurrent}). "
+            f"Rejecting request with HTTP 503 and Retry-After: {inference_limiter.retry_after_sec}."
+        )
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported audio format '{file_ext}'. Allowed formats: {', '.join(allowed_extensions)}",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Server inference capacity is currently saturated. Please retry shortly.",
+            headers={"Retry-After": str(inference_limiter.retry_after_sec)},
         )
 
-    # 2. Bounded streaming read into temporary file with 50 MB limit & format verification
-    max_bytes = 50 * 1024 * 1024  # 50 MB
-    chunk_size = 64 * 1024  # 64 KB
-    total_bytes = 0
-    header_bytes = bytearray()
-    header_validated = False
-
-    temp_file = tempfile.NamedTemporaryFile(suffix=file_ext, delete=False)
-    temp_path = Path(temp_file.name)
+    capacity_acquired = True
+    temp_file: Optional[tempfile._TemporaryFileWrapper] = None
+    temp_path: Optional[Path] = None
 
     try:
+        # 2. Validate parameters & file extension / mime
+        if tonic_hz is not None:
+            import math
+            if math.isnan(tonic_hz) or math.isinf(tonic_hz) or tonic_hz < settings.min_tonic_hz or tonic_hz > settings.max_tonic_hz:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Tonic frequency ({tonic_hz} Hz) is invalid or outside the permitted safe range "
+                        f"[{settings.min_tonic_hz}, {settings.max_tonic_hz}] Hz."
+                    ),
+                )
+
+        filename = audio_file.filename or "uploaded_audio"
+        allowed_extensions = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
+        file_ext = "." + filename.split(".")[-1].lower() if "." in filename else ""
+        if file_ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported audio format '{file_ext}'. Allowed formats: {', '.join(allowed_extensions)}",
+            )
+
+        # 3. Bounded streaming read into temporary file with 50 MB limit & format verification
+        max_bytes = 50 * 1024 * 1024  # 50 MB
+        chunk_size = 64 * 1024  # 64 KB
+        total_bytes = 0
+        header_bytes = bytearray()
+        header_validated = False
+
+        temp_file = tempfile.NamedTemporaryFile(suffix=file_ext, delete=False)
+        temp_path = Path(temp_file.name)
+
         try:
             while True:
                 chunk = await audio_file.read(chunk_size)
@@ -207,7 +259,11 @@ async def analyze_audio_endpoint(
 
                 temp_file.write(chunk)
         finally:
-            temp_file.close()
+            if temp_file is not None and not temp_file.closed:
+                try:
+                    temp_file.close()
+                except Exception:
+                    pass
 
         if total_bytes == 0:
             raise HTTPException(
@@ -221,7 +277,7 @@ async def analyze_audio_endpoint(
                     detail="File content does not match a supported audio format.",
                 )
 
-        # 3. Execute inference using temp_path
+        # 4. Execute inference using temp_path
         pipe = get_pipeline()
         try:
             result = pipe.analyze_audio(
@@ -244,12 +300,22 @@ async def analyze_audio_endpoint(
                 detail="Inference failure encountered during analysis.",
             )
 
+    except asyncio.CancelledError:
+        logger.info("Inference request cancelled. Resources will be cleaned up.")
+        raise
     finally:
-        if temp_path.exists():
+        if temp_file is not None and not temp_file.closed:
+            try:
+                temp_file.close()
+            except Exception:
+                pass
+        if temp_path is not None and temp_path.exists():
             try:
                 temp_path.unlink()
             except Exception as e:
                 logger.warning(f"Failed to remove temporary file {temp_path.name}: {e}")
+        if capacity_acquired:
+            inference_limiter.release()
 
     # 4. Map to response schema
     matches_schema = [

@@ -15,7 +15,7 @@ This report provides an empirical, statistically grounded benchmark of Indian cl
 ---
 
 ## 2. Consolidated Model Comparison Benchmark
-Comparison across Handcrafted Baselines (SVM, Random Forest, Logistic Regression), Frozen MERT, and Hybrid architectures. Statistics report Mean ± Standard Deviation across random seeds [42, 123, 999].
+Comparison across Handcrafted Baselines (SVM, Random Forest, Logistic Regression), Frozen MERT, and Hybrid architectures. **Model Optimization Variability**: Reported as Mean ± Standard Deviation across random seeds [42, 123, 999] (reflects sensitivity to weight initialization and batch ordering; *note: seed standard deviation is not a confidence interval*).
 
 | Model Architecture | Macro-F1 (Mean ± Std) | Accuracy (Mean ± Std) | Weighted-F1 | Log Loss | Brier Score | ECE |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -25,8 +25,12 @@ Comparison across Handcrafted Baselines (SVM, Random Forest, Logistic Regression
 | **Frozen MERT (95M)** | `0.2751 ± 0.0287` | `0.3778 ± 0.0314` | `0.2751` | `2.1511` | `0.8229` | `0.1179` |
 | **Hybrid (Pitch + MERT)** | `0.7022 ± 0.0412` | `0.7222 ± 0.0314` | `0.7022` | `0.9758` | `0.4516` | `0.1737` |
 
-### Primary Seed (42) Statistical Confidence Intervals (95% Cluster Bootstrap)
-Resampling performed over unique performance groups (10 clusters, 30 clips):
+### Primary Seed (42) Statistical Generalization Uncertainty (95% Cluster Bootstrap)
+Resampling performed over 10 unique performance groups (30 test clips). Quantifies generalization bounds to unseen performances/performers.
+
+> [!WARNING]
+> **Small-Sample Cluster Limitation**: The test partition contains 10 independent clusters (<15). Asymptotic cluster bootstrap coverage may exhibit downward bias; interpret confidence intervals with caution.
+
 
 | Architecture | Metric | Point Estimate | Bootstrap Mean | Std Err | 95% CI Lower | 95% CI Upper |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
