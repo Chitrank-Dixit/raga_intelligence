@@ -5,6 +5,7 @@ FastAPI application factory and middleware configuration.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -21,14 +22,22 @@ from raga_intelligence.config import settings
 
 logger = logging.getLogger(__name__)
 
+CORRELATION_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-\.]{1,64}$")
+
 
 class RequestCorrelationMiddleware(BaseHTTPMiddleware):
     """
     Ensures every incoming request has a unique correlation ID for end-to-end tracing.
-    Accepts X-Request-ID if provided by client/proxy; otherwise generates a UUID4.
+    Validates client/proxy supplied X-Request-ID (1-64 alphanumeric, dash, dot, underscore);
+    otherwise generates a new UUID4.
     """
     async def dispatch(self, request: Request, call_next):
-        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        raw_id = request.headers.get("X-Request-ID")
+        if raw_id and CORRELATION_ID_PATTERN.match(raw_id):
+            request_id = raw_id
+        else:
+            request_id = str(uuid.uuid4())
+
         request.state.request_id = request_id
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id

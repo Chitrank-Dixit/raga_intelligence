@@ -8,7 +8,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from sklearn.linear_model import LogisticRegression
@@ -19,29 +19,24 @@ from sklearn.svm import SVC
 
 from raga_intelligence.config import RAGA_LIST
 from raga_intelligence.evaluation.metrics import (
-    compute_classification_metrics,
     compute_multiclass_brier_score,
     compute_multiclass_log_loss,
 )
+from raga_intelligence.features.schema import FeatureBlock, FeatureSchema
 
 logger = logging.getLogger(__name__)
 
-# Feature slice definitions based on BaselineFeatureExtractor layout:
-# [0:12]: Pitch Class Distribution (12 dims)
-# [12:24]: Aligned Chroma CQT (12 dims)
-# [24:31]: Spectral features (7 dims)
-# [31:35]: Voiced / Pitch salience features (4 dims)
-# [35:75]: Melodic interval features (40 dims, if extracted)
-FEATURE_GROUP_SLICES: Dict[str, Tuple[int, int]] = {
-    "pcd": (0, 12),
-    "chroma": (12, 24),
-    "pitch_combined": (0, 24),
-    "spectral": (24, 34),
-    "voiced": (34, 35),
-    "spectral_and_voiced": (24, 35),
-    "all_handcrafted_35": (0, 35),
-    "melodic": (35, 75),
-}
+# Canonical feature group evaluation order derived from FeatureSchema
+CANONICAL_ABLATION_GROUPS: List[str] = [
+    "pcd",
+    "chroma",
+    "pitch_combined",
+    "spectral",
+    "voiced",
+    "spectral_and_voiced",
+    "all_handcrafted_35",
+    "melodic",
+]
 
 
 @dataclass
@@ -54,13 +49,14 @@ class AblationResult:
     weighted_f1: float
     multiclass_log_loss: Optional[float]
     brier_score: Optional[float]
-    delta_macro_f1: float  # Difference relative to all_handcrafted_35 or hybrid reference
+    delta_macro_f1: float  # Difference relative to all_handcrafted_35
     delta_accuracy: float
 
 
 class FeatureAblationStudy:
     """
-    Evaluates individual and combined feature groups on strictly identical data splits.
+    Evaluates individual and combined feature groups on strictly identical data splits
+    using a shared FeatureSchema and explicit array validation.
     """
 
     def __init__(
@@ -89,16 +85,49 @@ class FeatureAblationStudy:
         E_train: Optional[np.ndarray] = None,
         E_test: Optional[np.ndarray] = None,
         output_json_path: Optional[Path | str] = None,
+        recording_ids_train: Optional[Sequence[str]] = None,
+        recording_ids_test: Optional[Sequence[str]] = None,
+        dataset_fingerprint: Optional[str] = None,
     ) -> Dict[str, AblationResult]:
         """
         Runs comprehensive ablation experiments across all feature groups and saves results to JSON.
+        Validates feature schema dimensions and ensures strictly identical recording splits.
         """
+        # 1. Validate feature array dimensions using FeatureSchema
+        FeatureSchema.validate_array(X_train)
+        FeatureSchema.validate_array(X_test)
+
+        n_train = len(X_train)
+        n_test = len(X_test)
+
+        if len(y_train) != n_train:
+            raise ValueError(f"Dimension mismatch: X_train has {n_train} samples, y_train has {len(y_train)}")
+        if len(y_test) != n_test:
+            raise ValueError(f"Dimension mismatch: X_test has {n_test} samples, y_test has {len(y_test)}")
+
+        if recording_ids_train is not None and len(recording_ids_train) != n_train:
+            raise ValueError(
+                f"Dimension mismatch: recording_ids_train has {len(recording_ids_train)} IDs, expected {n_train}"
+            )
+        if recording_ids_test is not None and len(recording_ids_test) != n_test:
+            raise ValueError(
+                f"Dimension mismatch: recording_ids_test has {len(recording_ids_test)} IDs, expected {n_test}"
+            )
+
+        if E_train is not None and E_test is not None:
+            FeatureSchema.validate_array(E_train, expected_feature_type="mert_1536")
+            FeatureSchema.validate_array(E_test, expected_feature_type="mert_1536")
+            if len(E_train) != n_train:
+                raise ValueError(f"Dimension mismatch: E_train has {len(E_train)} samples, expected {n_train}")
+            if len(E_test) != n_test:
+                raise ValueError(f"Dimension mismatch: E_test has {len(E_test)} samples, expected {n_test}")
+
         results: Dict[str, AblationResult] = {}
 
-        # 1. First establish reference performance using all_handcrafted_35
-        ref_slice = FEATURE_GROUP_SLICES["all_handcrafted_35"]
-        ref_x_train = X_train[:, ref_slice[0] : ref_slice[1]]
-        ref_x_test = X_test[:, ref_slice[0] : ref_slice[1]]
+        # 2. Establish reference performance using all_handcrafted_35
+        ref_block = FeatureSchema.get_block("all_handcrafted_35")
+        ref_x_train = X_train[:, ref_block.slice]
+        ref_x_test = X_test[:, ref_block.slice]
 
         ref_pipe = self._build_classifier()
         ref_pipe.fit(ref_x_train, y_train)
@@ -106,8 +135,13 @@ class FeatureAblationStudy:
         ref_probs = ref_pipe.predict_proba(ref_x_test)
 
         ref_acc = float(accuracy_score(y_test, ref_preds))
-        _, _, ref_f1, _ = precision_recall_fscore_support(y_test, ref_preds, labels=self.class_names, zero_division=0)
+        _, _, ref_f1, ref_supp = precision_recall_fscore_support(
+            y_test, ref_preds, labels=self.class_names, zero_division=0
+        )
         ref_macro_f1 = float(np.mean(ref_f1))
+        ref_tot = np.sum(ref_supp)
+        ref_weighted_f1 = float(np.sum(ref_f1 * ref_supp) / ref_tot) if ref_tot > 0 else 0.0
+
         ref_log_loss = compute_multiclass_log_loss(y_test, ref_probs, self.class_names)
         ref_brier = compute_multiclass_brier_score(y_test, ref_probs, self.class_names)
 
@@ -116,23 +150,27 @@ class FeatureAblationStudy:
             feature_dimension=ref_x_train.shape[1],
             accuracy=round(ref_acc, 4),
             macro_f1=round(ref_macro_f1, 4),
-            weighted_f1=round(float(np.mean(ref_f1)), 4),
+            weighted_f1=round(ref_weighted_f1, 4),
             multiclass_log_loss=ref_log_loss,
             brier_score=ref_brier,
             delta_macro_f1=0.0,
             delta_accuracy=0.0,
         )
 
-        # 2. Evaluate each handcrafted feature slice
-        for group_name, (start_idx, end_idx) in FEATURE_GROUP_SLICES.items():
+        # 3. Evaluate each handcrafted feature block in FeatureSchema
+        for group_name in CANONICAL_ABLATION_GROUPS:
             if group_name == "all_handcrafted_35":
                 continue
-            if end_idx > X_train.shape[1]:
-                # Skip if array doesn't have these dimensions (e.g. melodic features)
+            if not FeatureSchema.has_block(group_name):
                 continue
 
-            sub_x_train = X_train[:, start_idx:end_idx]
-            sub_x_test = X_test[:, start_idx:end_idx]
+            block = FeatureSchema.get_block(group_name)
+            if block.end_idx > X_train.shape[1]:
+                # Skip if feature array does not contain this block (e.g. melodic)
+                continue
+
+            sub_x_train = X_train[:, block.slice]
+            sub_x_test = X_test[:, block.slice]
 
             pipe = self._build_classifier()
             pipe.fit(sub_x_train, y_train)
@@ -140,7 +178,9 @@ class FeatureAblationStudy:
             probs = pipe.predict_proba(sub_x_test)
 
             acc = float(accuracy_score(y_test, preds))
-            _, _, f1_arr, supp = precision_recall_fscore_support(y_test, preds, labels=self.class_names, zero_division=0)
+            _, _, f1_arr, supp = precision_recall_fscore_support(
+                y_test, preds, labels=self.class_names, zero_division=0
+            )
             macro_f1 = float(np.mean(f1_arr))
             tot = np.sum(supp)
             weighted_f1 = float(np.sum(f1_arr * supp) / tot) if tot > 0 else 0.0
@@ -160,7 +200,7 @@ class FeatureAblationStudy:
                 delta_accuracy=round(acc - ref_acc, 4),
             )
 
-        # 3. Evaluate MERT embeddings alone if provided
+        # 4. Evaluate MERT embeddings alone if provided
         if E_train is not None and E_test is not None:
             pipe_mert = self._build_classifier()
             pipe_mert.fit(E_train, y_train)
@@ -168,7 +208,9 @@ class FeatureAblationStudy:
             mert_probs = pipe_mert.predict_proba(E_test)
 
             m_acc = float(accuracy_score(y_test, mert_preds))
-            _, _, m_f1, m_supp = precision_recall_fscore_support(y_test, mert_preds, labels=self.class_names, zero_division=0)
+            _, _, m_f1, m_supp = precision_recall_fscore_support(
+                y_test, mert_preds, labels=self.class_names, zero_division=0
+            )
             m_macro_f1 = float(np.mean(m_f1))
             m_tot = np.sum(m_supp)
             m_weighted_f1 = float(np.sum(m_f1 * m_supp) / m_tot) if m_tot > 0 else 0.0
@@ -185,7 +227,7 @@ class FeatureAblationStudy:
                 delta_accuracy=round(m_acc - ref_acc, 4),
             )
 
-            # 4. Evaluate Hybrid combination (Handcrafted 35-dim + MERT 1536-dim)
+            # 5. Evaluate Hybrid combination (Handcrafted 35-dim + MERT 1536-dim)
             H_train = np.hstack([ref_x_train, E_train])
             H_test = np.hstack([ref_x_test, E_test])
 
@@ -195,7 +237,9 @@ class FeatureAblationStudy:
             hyb_probs = pipe_hybrid.predict_proba(H_test)
 
             h_acc = float(accuracy_score(y_test, hyb_preds))
-            _, _, h_f1, h_supp = precision_recall_fscore_support(y_test, hyb_preds, labels=self.class_names, zero_division=0)
+            _, _, h_f1, h_supp = precision_recall_fscore_support(
+                y_test, hyb_preds, labels=self.class_names, zero_division=0
+            )
             h_macro_f1 = float(np.mean(h_f1))
             h_tot = np.sum(h_supp)
             h_weighted_f1 = float(np.sum(h_f1 * h_supp) / h_tot) if h_tot > 0 else 0.0
@@ -215,9 +259,23 @@ class FeatureAblationStudy:
         if output_json_path:
             p = Path(output_json_path)
             p.parent.mkdir(parents=True, exist_ok=True)
-            serializable = {k: asdict(v) for k, v in results.items()}
+            payload: Dict[str, Any] = {
+                "dataset_fingerprint": dataset_fingerprint,
+                "feature_schema_version": FeatureSchema.SCHEMA_VERSION,
+                "split_identity": {
+                    "n_train": n_train,
+                    "n_test": n_test,
+                    "recording_ids_train": list(recording_ids_train) if recording_ids_train is not None else None,
+                    "recording_ids_test": list(recording_ids_test) if recording_ids_test is not None else None,
+                },
+                "results": {k: asdict(v) for k, v in results.items()},
+            }
+            # Top-level results preservation for backward-compatibility
+            for k, v in results.items():
+                payload[k] = asdict(v)
+
             with open(p, "w", encoding="utf-8") as f:
-                json.dump(serializable, f, indent=2)
+                json.dump(payload, f, indent=2)
 
         return results
 

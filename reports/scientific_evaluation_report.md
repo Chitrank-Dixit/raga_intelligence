@@ -2,6 +2,7 @@
 **Phase**: Phase 2.1 — Scientific Evaluation Framework
 **Execution Device**: `cpu`
 **Seeds Evaluated**: `[42, 123, 999]`
+**Primary Seed**: `42`
 
 ## 1. Executive Summary & Core Findings
 This report provides an empirical, statistically grounded benchmark of Indian classical raga recognition across 10 canonical ragas using the Hindustani audio corpus (390 clips total, 360 train, 30 held-out test). All models are evaluated on the exact same held-out test partition with zero recording, performance, or performer leakage. Statistical uncertainty is computed using non-parametric cluster bootstrap resampling (1000 draws) at the performance/performer level to preserve intra-recording correlation.
@@ -14,7 +15,7 @@ This report provides an empirical, statistically grounded benchmark of Indian cl
 ---
 
 ## 2. Consolidated Model Comparison Benchmark
-Comparison across Handcrafted Baselines (SVM, Random Forest, Logistic Regression), Frozen MERT, and Hybrid architectures. Statistics report Mean ± Standard Deviation across random seeds (42, 123, 999).
+Comparison across Handcrafted Baselines (SVM, Random Forest, Logistic Regression), Frozen MERT, and Hybrid architectures. Statistics report Mean ± Standard Deviation across random seeds [42, 123, 999].
 
 | Model Architecture | Macro-F1 (Mean ± Std) | Accuracy (Mean ± Std) | Weighted-F1 | Log Loss | Brier Score | ECE |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -69,46 +70,44 @@ Evaluates the individual and grouped discriminative power of musical features on
 
 ## Automated Error Analysis & Musicological Diagnostics
 - **Evaluated Samples**: `30`
-- **Total Misclassifications**: `9`
-- **Overall Error Rate**: `0.3000` (30.0%)
+- **Total Misclassifications**: `7`
+- **Overall Error Rate**: `0.2333` (23.3%)
 
 ### Top Frequently Confused Raga Pairs
 | True Raga | Predicted As | Count | % of Errors | Musical Explanation (Hypothesis) |
 | :--- | :--- | :---: | :---: | :--- |
-| **Darbari Kanada** | **Deshkar** | 3 | 33.3% | *Hypothesis: Acoustic or modal overlap between 'Darbari Kanada' and 'Deshkar'. Possible shared swara subsets, tetrachord structural affinity, or ambiguous melodic phrases in short segments lacking defining prayogas or vadi-samvadi emphasis.* |
-| **Bhoopali** | **Deshkar** | 2 | 22.2% | *Hypothesis: Both Bhoopali and Deshkar are Audav (pentatonic) ragas belonging to Bilawal thhat sharing the identical swara scale: Sa, Re, Ga, Pa, Dha (omitting Ma and Ni). They are distinguished primarily by Vadi/Samvadi hierarchy (Gandhar in Bhoopali vs Dhaivat in Deshkar), register emphasis (Bhoopali favors Mandra and Madhya saptak with characteristic glide G \ R S, whereas Deshkar emphasizes Taar saptak and prayogas like D-P, G-P-D-S'), and sangatis. Without sequential melodic phrase contours (chalan) or octave register weighting, static pitch histograms cannot reliably separate them.* |
-| **Bageshree** | **Malkauns** | 1 | 11.1% | *Hypothesis: Acoustic or modal overlap between 'Bageshree' and 'Malkauns'. Possible shared swara subsets, tetrachord structural affinity, or ambiguous melodic phrases in short segments lacking defining prayogas or vadi-samvadi emphasis.* |
-| **Bhairavi** | **Darbari Kanada** | 1 | 11.1% | *Hypothesis: Acoustic or modal overlap between 'Bhairavi' and 'Darbari Kanada'. Possible shared swara subsets, tetrachord structural affinity, or ambiguous melodic phrases in short segments lacking defining prayogas or vadi-samvadi emphasis.* |
-| **Bhoopali** | **Bhairav** | 1 | 11.1% | *Hypothesis: Acoustic or modal overlap between 'Bhoopali' and 'Bhairav'. Possible shared swara subsets, tetrachord structural affinity, or ambiguous melodic phrases in short segments lacking defining prayogas or vadi-samvadi emphasis.* |
-| **Kafi** | **Deshkar** | 1 | 11.1% | *Hypothesis: Acoustic or modal overlap between 'Kafi' and 'Deshkar'. Possible shared swara subsets, tetrachord structural affinity, or ambiguous melodic phrases in short segments lacking defining prayogas or vadi-samvadi emphasis.* |
+| **Bhoopali** | **Deshkar** | 2 | 28.6% | *Hypothesis: Both Bhoopali and Deshkar are Audav (pentatonic) ragas belonging to Bilawal thhat sharing the identical swara scale: Sa, Re, Ga, Pa, Dha (omitting Ma and Ni). They are distinguished primarily by Vadi/Samvadi hierarchy (Gandhar in Bhoopali vs Dhaivat in Deshkar), register emphasis (Bhoopali favors Mandra and Madhya saptak with characteristic glide G \ R S, whereas Deshkar emphasizes Taar saptak and prayogas like D-P, G-P-D-S'), and sangatis. Without sequential melodic phrase contours (chalan) or octave register weighting, static pitch histograms cannot reliably separate them.* |
+| **Bageshree** | **Deshkar** | 1 | 14.3% | *Hypothesis: Acoustic or modal overlap between 'Bageshree' and 'Deshkar'. Possible shared swara subsets, tetrachord structural affinity, or ambiguous melodic phrases in short segments lacking defining prayogas or vadi-samvadi emphasis.* |
+| **Bhoopali** | **Bhairav** | 1 | 14.3% | *Hypothesis: Acoustic or modal overlap between 'Bhoopali' and 'Bhairav'. Possible shared swara subsets, tetrachord structural affinity, or ambiguous melodic phrases in short segments lacking defining prayogas or vadi-samvadi emphasis.* |
+| **Darbari Kanada** | **Deshkar** | 1 | 14.3% | *Hypothesis: Acoustic or modal overlap between 'Darbari Kanada' and 'Deshkar'. Possible shared swara subsets, tetrachord structural affinity, or ambiguous melodic phrases in short segments lacking defining prayogas or vadi-samvadi emphasis.* |
+| **Kafi** | **Bhoopali** | 1 | 14.3% | *Hypothesis: Acoustic or modal overlap between 'Kafi' and 'Bhoopali'. Possible shared swara subsets, tetrachord structural affinity, or ambiguous melodic phrases in short segments lacking defining prayogas or vadi-samvadi emphasis.* |
+| **Todi** | **Deshkar** | 1 | 14.3% | *Hypothesis: Acoustic or modal overlap between 'Todi' and 'Deshkar'. Possible shared swara subsets, tetrachord structural affinity, or ambiguous melodic phrases in short segments lacking defining prayogas or vadi-samvadi emphasis.* |
 
 ### Directional Confusion Asymmetry
 | Raga Pair | Direction A -> B | Direction B -> A | Net Bias | Dominant Direction |
 | :--- | :---: | :---: | :---: | :--- |
-| **Darbari Kanada & Deshkar** | 3 | 0 | 3 | Darbari Kanada -> Deshkar (3 vs 0) |
 | **Bhoopali & Deshkar** | 2 | 0 | 2 | Bhoopali -> Deshkar (2 vs 0) |
-| **Bageshree & Malkauns** | 1 | 0 | 1 | Bageshree -> Malkauns (1 vs 0) |
-| **Bhairavi & Darbari Kanada** | 1 | 0 | 1 | Bhairavi -> Darbari Kanada (1 vs 0) |
+| **Bageshree & Deshkar** | 1 | 0 | 1 | Bageshree -> Deshkar (1 vs 0) |
 | **Bhairav & Bhoopali** | 0 | 1 | 1 | Bhoopali -> Bhairav (1 vs 0) |
-| **Deshkar & Kafi** | 0 | 1 | 1 | Kafi -> Deshkar (1 vs 0) |
+| **Darbari Kanada & Deshkar** | 1 | 0 | 1 | Darbari Kanada -> Deshkar (1 vs 0) |
+| **Bhoopali & Kafi** | 0 | 1 | 1 | Kafi -> Bhoopali (1 vs 0) |
+| **Deshkar & Todi** | 0 | 1 | 1 | Todi -> Deshkar (1 vs 0) |
 
 ### Classes with Poor Recall (< 0.50)
 | Raga | Recall | Support | Frequent Misclassifications |
 | :--- | :---: | :---: | :--- |
 | **Bhoopali** | `0.0000` | 3 | `Bhairav`, `Deshkar`, `Deshkar` |
-| **Darbari Kanada** | `0.0000` | 3 | `Deshkar`, `Deshkar`, `Deshkar` |
 
 ### Classes with Poor Precision (< 0.50)
 | Raga | Precision | False Positives | Intruding True Classes |
 | :--- | :---: | :---: | :--- |
-| **Bhoopali** | `0.0000` | 0 | None |
-| **Darbari Kanada** | `0.0000` | 1 | `Bhairavi` |
-| **Deshkar** | `0.3333` | 6 | `Bhoopali`, `Bhoopali`, `Darbari Kanada`, `Darbari Kanada`, `Darbari Kanada`, `Kafi` |
+| **Bhoopali** | `0.0000` | 1 | `Kafi` |
+| **Deshkar** | `0.3750` | 5 | `Bageshree`, `Bhoopali`, `Bhoopali`, `Darbari Kanada`, `Todi` |
 
 ### Acoustic Quality vs. Error Correlation
-- **Error Rate in Low-Voiced Segments (< median 1.00)**: `0.2857`
-- **Error Rate in High-Voiced Segments**: `0.3043`
-- **Low-Voiced Error Inflation**: `-0.0186`
+- **Error Rate in Low-Voiced Segments (< median 1.00)**: `0.1429`
+- **Error Rate in High-Voiced Segments**: `0.2609`
+- **Low-Voiced Error Inflation**: `-0.1180`
 
 ---
 

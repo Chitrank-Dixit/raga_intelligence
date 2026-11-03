@@ -26,8 +26,7 @@ from raga_intelligence.evaluation.error_analysis import (
 )
 from raga_intelligence.evaluation.reporting import generate_markdown_report
 from raga_intelligence.evaluation.tracker import ExperimentTracker
-from raga_intelligence.models.hybrid import HybridRagaClassifier
-from torch.utils.data import DataLoader, TensorDataset
+from raga_intelligence.features.cache import validate_cache_manifest_provenance
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -74,8 +73,20 @@ def main():
     # 2. Load Cached Features & Embeddings
     # =========================================================================
     logger.info("=== Loading Handcrafted Features & MERT Embeddings ===")
-    feat_cache = np.load(args.features_cache)
-    mert_cache = np.load(args.mert_cache)
+    feat_cache = np.load(args.features_cache, allow_pickle=True)
+    mert_cache = np.load(args.mert_cache, allow_pickle=True)
+
+    # Validate strict provenance against audited dataset manifest
+    val_report = validate_cache_manifest_provenance(
+        manifest=manifest,
+        feat_cache_data=feat_cache,
+        mert_cache_data=mert_cache,
+        raise_on_error=True,
+    )
+    logger.info(
+        f"Cache provenance successfully verified! Dataset fingerprint: {val_report.dataset_fingerprint[:16]}... "
+        f"Train: {val_report.n_train}, Test: {val_report.n_test}"
+    )
 
     X_train = feat_cache["X_train"]
     y_train = feat_cache["y_train"]
@@ -84,10 +95,6 @@ def main():
 
     E_train = mert_cache["E_train"]
     E_test = mert_cache["E_test"]
-
-    assert len(X_train) == len(E_train), f"Train mismatch: {len(X_train)} vs {len(E_train)}"
-    assert len(X_test) == len(E_test), f"Test mismatch: {len(X_test)} vs {len(E_test)}"
-    assert np.array_equal(y_test, mert_cache["y_test"]), "Test label misalignment between feature caches!"
 
     logger.info(f"Train split: {len(X_train)} clips | Test split: {len(X_test)} clips.")
     logger.info(f"Musical features dim: {X_train.shape[1]} | MERT embeddings dim: {E_train.shape[1]}")
@@ -100,6 +107,22 @@ def main():
     tracker = ExperimentTracker(experiment_dir=args.tracker_dir)
 
     aggregated_models: List[AggregatedModelStats] = []
+
+    # Common provenance dictionary persisted for all runs
+    common_provenance = {
+        "dataset_fingerprint": val_report.dataset_fingerprint,
+        "dataset_version": "1.0.0",
+        "recording_ids_per_split": {
+            "train": val_report.recording_ids_train,
+            "test": val_report.recording_ids_test,
+        },
+        "cache_fingerprints": {
+            "features_cache": args.features_cache,
+            "mert_cache": args.mert_cache,
+        },
+        "feature_schema_version": val_report.feature_schema_version,
+        "mert_model_revision": settings.model.mert_model_revision,
+    }
 
     # Model 1: Handcrafted SVM
     logger.info(f"Evaluating Baseline SVM across seeds {args.seeds}...")
@@ -131,6 +154,7 @@ def main():
                 "confidence_intervals": m.confidence_intervals,
             },
             notes="Phase 2.1 Scientific Benchmark",
+            **common_provenance,
         )
 
     # Model 2: Handcrafted Random Forest
@@ -163,6 +187,7 @@ def main():
                 "confidence_intervals": m.confidence_intervals,
             },
             notes="Phase 2.1 Scientific Benchmark",
+            **common_provenance,
         )
 
     # Model 3: Handcrafted Logistic Regression
@@ -195,6 +220,7 @@ def main():
                 "confidence_intervals": m.confidence_intervals,
             },
             notes="Phase 2.1 Scientific Benchmark",
+            **common_provenance,
         )
 
     # Model 4: Frozen MERT + Classifier Head
@@ -228,6 +254,7 @@ def main():
                 "confidence_intervals": m.confidence_intervals,
             },
             notes="Phase 2.1 Scientific Benchmark",
+            **common_provenance,
         )
 
     # Model 5: Hybrid Late Fusion
@@ -263,13 +290,15 @@ def main():
                 "confidence_intervals": m.confidence_intervals,
             },
             notes="Phase 2.1 Scientific Benchmark",
+            **common_provenance,
         )
 
     # =========================================================================
     # 4. Feature Ablation Study (Task 4)
     # =========================================================================
     logger.info("=== Task 4: Feature Group Ablation Study ===")
-    ablation_study = FeatureAblationStudy(class_names=RAGA_LIST, random_seed=42)
+    primary_seed = args.seeds[0]
+    ablation_study = FeatureAblationStudy(class_names=RAGA_LIST, random_seed=primary_seed)
     ablation_results = ablation_study.run_study(
         X_train=X_train,
         y_train=y_train,
@@ -278,6 +307,9 @@ def main():
         E_train=E_train,
         E_test=E_test,
         output_json_path=args.ablation_json,
+        recording_ids_train=val_report.recording_ids_train,
+        recording_ids_test=val_report.recording_ids_test,
+        dataset_fingerprint=val_report.dataset_fingerprint,
     )
     logger.info(f"Feature ablation study completed and persisted to {args.ablation_json}")
 
@@ -285,64 +317,27 @@ def main():
     # 5. Automated Error Analysis (Task 3)
     # =========================================================================
     logger.info("=== Task 3: Error Analysis & Musicological Diagnostics ===")
-    hybrid_primary = hybrid_seeds[42]
-    # Re-infer predictions for seed 42 to get labels
-    # Use representative metrics from hybrid_primary
-    # Extract audio quality features from test set
+    logger.info(f"Using primary seed {primary_seed} benchmark predictions for error analysis...")
     test_voiced_ratios = X_test[:, 34]      # Voiced ratio
     test_spectral_flatness = X_test[:, 26]  # Spectral flatness
 
-    # Derive hybrid predictions from seed 42
-    # To obtain exact string predictions for error analysis:
-    hybrid_model = HybridRagaClassifier(musical_dim=35, mert_dim=1536, num_classes=10).to(device)
-    # Run evaluation with seed 42 weights to get exact predictions
-    torch.manual_seed(42)
-    np.random.seed(42)
-    train_ds = TensorDataset(
-        torch.tensor(X_train, dtype=torch.float32),
-        torch.tensor(E_train, dtype=torch.float32),
-        torch.tensor([runner.class_to_idx[c] for c in y_train], dtype=torch.long),
-    )
-    t_loader = DataLoader(train_ds, batch_size=16, shuffle=True)
-    crit = torch.nn.CrossEntropyLoss()
-    opt = torch.optim.AdamW(hybrid_model.parameters(), lr=1e-3, weight_decay=1e-2)
-    hybrid_model.train()
-    for _ in range(25):
-        for mb, eb, yb in t_loader:
-            mb, eb, yb = mb.to(device), eb.to(device), yb.to(device)
-            opt.zero_grad()
-            l = crit(hybrid_model(mb, eb), yb)
-            l.backward()
-            opt.step()
-
-    hybrid_model.eval()
-    with torch.no_grad():
-        out = hybrid_model(torch.tensor(X_test, dtype=torch.float32).to(device), torch.tensor(E_test, dtype=torch.float32).to(device))
-        probs_hybrid = torch.softmax(out, dim=-1).cpu().numpy()
-        preds_hybrid = [RAGA_LIST[i] for i in np.argmax(probs_hybrid, axis=1)]
-
+    # Directly reuse benchmark predictions and probabilities from primary seed
+    hybrid_primary = hybrid_seeds[primary_seed]
     error_report = analyze_classification_errors(
         y_true=y_test,
-        y_pred=preds_hybrid,
+        y_pred=hybrid_primary.y_pred,
         class_names=RAGA_LIST,
-        y_probs=probs_hybrid,
+        y_probs=hybrid_primary.y_probs,
         voiced_ratios=test_voiced_ratios,
         spectral_flatness=test_spectral_flatness,
     )
 
-    # Also run error analysis for baseline SVM
-    from sklearn.pipeline import Pipeline
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.svm import SVC
-    svm_pipe = Pipeline([("scaler", StandardScaler()), ("clf", SVC(kernel="rbf", C=10.0, probability=True, random_state=42))])
-    svm_pipe.fit(X_train, y_train)
-    preds_svm = svm_pipe.predict(X_test)
-    probs_svm = svm_pipe.predict_proba(X_test)
+    svm_primary = svm_seeds[primary_seed]
     error_report_svm = analyze_classification_errors(
         y_true=y_test,
-        y_pred=preds_svm,
+        y_pred=svm_primary.y_pred,
         class_names=RAGA_LIST,
-        y_probs=probs_svm,
+        y_probs=svm_primary.y_probs,
         voiced_ratios=test_voiced_ratios,
         spectral_flatness=test_spectral_flatness,
     )
@@ -356,6 +351,7 @@ def main():
         "**Phase**: Phase 2.1 — Scientific Evaluation Framework",
         f"**Execution Device**: `{device}`",
         f"**Seeds Evaluated**: `{args.seeds}`",
+        f"**Primary Seed**: `{primary_seed}`",
         "",
         "## 1. Executive Summary & Core Findings",
         "This report provides an empirical, statistically grounded benchmark of Indian classical raga recognition "
@@ -379,12 +375,12 @@ def main():
         "---",
         "",
         "## 2. Consolidated Model Comparison Benchmark",
-        "Comparison across Handcrafted Baselines (SVM, Random Forest, Logistic Regression), Frozen MERT, and Hybrid architectures. "
-        "Statistics report Mean ± Standard Deviation across random seeds (42, 123, 999).",
+        f"Comparison across Handcrafted Baselines (SVM, Random Forest, Logistic Regression), Frozen MERT, and Hybrid architectures. "
+        f"Statistics report Mean ± Standard Deviation across random seeds {args.seeds}.",
         "",
         ModelBenchmarkRunner.format_comparison_markdown_table(aggregated_models),
         "",
-        "### Primary Seed (42) Statistical Confidence Intervals (95% Cluster Bootstrap)",
+        f"### Primary Seed ({primary_seed}) Statistical Confidence Intervals (95% Cluster Bootstrap)",
         "Resampling performed over unique performance groups (10 clusters, 30 clips):",
         "",
         "| Architecture | Metric | Point Estimate | Bootstrap Mean | Std Err | 95% CI Lower | 95% CI Upper |",

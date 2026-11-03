@@ -32,6 +32,32 @@ class EvaluationMetrics:
     brier_score: Optional[float] = None
     expected_calibration_error: Optional[float] = None
     confidence_intervals: Optional[Dict[str, Dict[str, float]]] = field(default=None)
+    n_groups: Optional[int] = None
+
+
+def _validate_probability_matrix(
+    y_true: Sequence[str] | np.ndarray,
+    y_probs: np.ndarray,
+    class_names: List[str],
+) -> None:
+    """Validates 2D probability matrix shape, finiteness, range, and class dimension."""
+    if not isinstance(y_probs, np.ndarray):
+        raise TypeError(f"y_probs must be a numpy ndarray, got {type(y_probs).__name__}")
+    if y_probs.ndim != 2:
+        raise ValueError(f"y_probs must be 2-dimensional (samples, classes), got ndim={y_probs.ndim}")
+    n_samples = len(y_true)
+    if y_probs.shape[0] != n_samples:
+        raise ValueError(
+            f"y_probs sample count ({y_probs.shape[0]}) does not match y_true length ({n_samples})"
+        )
+    if y_probs.shape[1] != len(class_names):
+        raise ValueError(
+            f"y_probs class dimension ({y_probs.shape[1]}) does not match class_names count ({len(class_names)})"
+        )
+    if not np.all(np.isfinite(y_probs)):
+        raise ValueError("Probability matrix contains non-finite values (NaN, Inf, or -Inf)")
+    if np.any(y_probs < 0.0):
+        raise ValueError("Probability matrix contains negative values")
 
 
 def compute_multiclass_brier_score(
@@ -45,6 +71,7 @@ def compute_multiclass_brier_score(
     
     Lower is better (0.0 is perfect calibration and sharpness).
     """
+    _validate_probability_matrix(y_true, y_probs, class_names)
     class_to_idx = {name: i for i, name in enumerate(class_names)}
     n_samples, n_classes = y_probs.shape
     if n_samples == 0:
@@ -70,14 +97,13 @@ def compute_multiclass_log_loss(
     Computes multi-class cross-entropy log loss with numerical clipping:
     Loss = - (1/N) * sum_{i=1}^N sum_{c=1}^K y_{ic} * log(p_{ic})
     """
+    _validate_probability_matrix(y_true, y_probs, class_names)
     class_to_idx = {name: i for i, name in enumerate(class_names)}
     n_samples, n_classes = y_probs.shape
     if n_samples == 0:
         return 0.0
 
-    # Clip probabilities to prevent log(0)
     clipped_probs = np.clip(y_probs, eps, 1.0 - eps)
-    # Renormalize to ensure sum to 1
     clipped_probs = clipped_probs / np.sum(clipped_probs, axis=1, keepdims=True)
 
     y_one_hot = np.zeros((n_samples, n_classes), dtype=np.float64)
@@ -102,6 +128,7 @@ def compute_calibration_error(
     ECE partitions predictions into n_bins based on confidence (max softmax probability)
     and computes the weighted difference between average confidence and true accuracy.
     """
+    _validate_probability_matrix(y_true, y_probs, class_names)
     class_to_idx = {name: i for i, name in enumerate(class_names)}
     true_indices = np.array([class_to_idx.get(name, -1) for name in y_true])
 
@@ -131,8 +158,8 @@ def compute_grouped_bootstrap_confidence_intervals(
     y_true: Sequence[str] | np.ndarray,
     y_pred: Sequence[str] | np.ndarray,
     class_names: List[str],
+    groups: Sequence[str] | np.ndarray,
     y_probs: Optional[np.ndarray] = None,
-    groups: Optional[Sequence[str] | np.ndarray] = None,
     n_bootstraps: int = 1000,
     alpha: float = 0.05,
     seed: int = 42,
@@ -140,33 +167,48 @@ def compute_grouped_bootstrap_confidence_intervals(
     """
     Computes non-parametric cluster/grouped bootstrap confidence intervals.
     
-    Resampling occurs at the cluster/group level (e.g. performance_id or recording_id)
+    Resampling occurs strictly at the cluster/group level (e.g. performance_id or performer)
     to respect the intra-cluster correlation structure of musical recordings and avoid
     treating non-independent chunks as i.i.d. observations.
     
-    Returns empirical confidence bounds [alpha/2, 1 - alpha/2], bootstrap mean, and standard error.
+    Returns empirical confidence bounds [alpha/2, 1 - alpha/2], bootstrap mean, standard error,
+    and reports n_groups.
     """
-    rng = np.random.default_rng(seed)
+    if groups is None:
+        raise ValueError(
+            "Group identifiers ('groups') are strictly required for grouped bootstrap confidence intervals. "
+            "Resampling without group identifiers treats non-independent frames/clips as i.i.d. observations."
+        )
+
     y_true_arr = np.asarray(y_true)
     y_pred_arr = np.asarray(y_pred)
+    groups_arr = np.asarray(groups)
     n_samples = len(y_true_arr)
 
     if n_samples == 0:
-        return {}
+        raise ValueError("Cannot compute confidence intervals on empty sample arrays.")
 
-    if groups is None:
-        # Fall back to standard sample-level bootstrap if no grouping metadata exists
-        group_keys = np.arange(n_samples)
-        group_to_indices = {i: [i] for i in range(n_samples)}
-        unique_groups = group_keys
-    else:
-        groups_arr = np.asarray(groups)
-        unique_groups = np.unique(groups_arr)
-        group_to_indices = {g: np.where(groups_arr == g)[0] for g in unique_groups}
+    if len(y_pred_arr) != n_samples:
+        raise ValueError(
+            f"Input dimension mismatch: len(y_true)={n_samples} != len(y_pred)={len(y_pred_arr)}"
+        )
+    if len(groups_arr) != n_samples:
+        raise ValueError(
+            f"Input dimension mismatch: len(groups)={len(groups_arr)} != len(y_true)={n_samples}"
+        )
 
+    unique_groups = np.unique(groups_arr)
     n_groups = len(unique_groups)
-    if n_groups == 0:
-        return {}
+    if n_groups < 2:
+        raise ValueError(
+            f"Grouped bootstrap requires at least 2 independent groups for resampling, but found only {n_groups} group(s)."
+        )
+
+    if y_probs is not None:
+        _validate_probability_matrix(y_true_arr, y_probs, class_names)
+
+    rng = np.random.default_rng(seed)
+    group_to_indices = {g: np.where(groups_arr == g)[0] for g in unique_groups}
 
     boot_metrics: Dict[str, List[float]] = {
         "accuracy": [],
@@ -179,9 +221,7 @@ def compute_grouped_bootstrap_confidence_intervals(
         boot_metrics["ece"] = []
 
     for _ in range(n_bootstraps):
-        # Draw clusters with replacement
         sampled_groups = rng.choice(unique_groups, size=n_groups, replace=True)
-        # Assemble item indices from the sampled clusters
         sampled_idx_list = [idx for g in sampled_groups for idx in group_to_indices[g]]
         if not sampled_idx_list:
             continue
@@ -229,6 +269,7 @@ def compute_grouped_bootstrap_confidence_intervals(
             "ci_upper": round(ci_upper, 4),
             "mean": round(mean_val, 4),
             "std": round(std_val, 4),
+            "n_groups": float(n_groups),
         }
 
     return ci_results
@@ -248,6 +289,10 @@ def compute_classification_metrics(
     """Computes comprehensive classification metrics, calibration measures, and confidence intervals."""
     y_true_arr = np.asarray(y_true)
     y_pred_arr = np.asarray(y_pred)
+    n_samples = len(y_true_arr)
+
+    if len(y_pred_arr) != n_samples:
+        raise ValueError(f"Dimension mismatch between y_true ({n_samples}) and y_pred ({len(y_pred_arr)})")
 
     acc = float(accuracy_score(y_true_arr, y_pred_arr))
 
@@ -274,22 +319,30 @@ def compute_classification_metrics(
     log_loss: Optional[float] = None
 
     if y_probs is not None:
+        _validate_probability_matrix(y_true_arr, y_probs, class_names)
         ece = compute_calibration_error(y_true_arr, y_probs, class_names)
         brier = compute_multiclass_brier_score(y_true_arr, y_probs, class_names)
         log_loss = compute_multiclass_log_loss(y_true_arr, y_probs, class_names)
 
     ci_dict: Optional[Dict[str, Dict[str, float]]] = None
+    n_groups_count: Optional[int] = None
+
     if compute_ci:
+        if groups is None:
+            raise ValueError(
+                "Group identifiers ('groups') are strictly required for grouped bootstrap confidence intervals."
+            )
         ci_dict = compute_grouped_bootstrap_confidence_intervals(
             y_true=y_true_arr,
             y_pred=y_pred_arr,
             class_names=class_names,
-            y_probs=y_probs,
             groups=groups,
+            y_probs=y_probs,
             n_bootstraps=n_bootstraps,
             alpha=alpha,
             seed=seed,
         )
+        n_groups_count = len(np.unique(np.asarray(groups)))
 
     return EvaluationMetrics(
         accuracy=round(acc, 4),
@@ -309,4 +362,5 @@ def compute_classification_metrics(
         brier_score=brier,
         expected_calibration_error=round(ece, 4) if ece is not None else None,
         confidence_intervals=ci_dict,
+        n_groups=n_groups_count,
     )

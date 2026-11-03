@@ -20,6 +20,7 @@ from raga_intelligence.datasets.manifest import DatasetManifest
 from raga_intelligence.evaluation.metrics import EvaluationMetrics, compute_classification_metrics
 from raga_intelligence.features.cache import FeatureCacheManager, compute_manifest_content_fingerprint
 from raga_intelligence.features.extractor import BaselineFeatureExtractor
+from raga_intelligence.features.schema import FeatureSchema
 from raga_intelligence.models.baseline import BaselineRagaClassifier
 from raga_intelligence.models.classifier import MERTClassifierHead
 from raga_intelligence.models.hybrid import HybridRagaClassifier
@@ -41,6 +42,8 @@ def extract_features_from_manifest(
     config = FeatureConfig(include_melodic_features=include_melodic_features)
 
     expected_meta = {
+        "dataset_fingerprint": manifest.compute_dataset_fingerprint(),
+        "feature_schema_version": FeatureSchema.SCHEMA_VERSION,
         "extractor_version": "1.0.0",
         "include_melodic_features": bool(include_melodic_features),
         "pitch_tracker": str(config.pitch_tracker),
@@ -50,6 +53,14 @@ def extract_features_from_manifest(
         "sample_rate": 24000,
         "manifest_hash": manifest_hash,
         "items_count": len(manifest.items),
+        "preprocessing_config": {
+            "sample_rate": 24000,
+            "hop_length": int(config.hop_length),
+            "fmin": float(config.fmin),
+            "fmax": float(config.fmax),
+            "pitch_tracker": str(config.pitch_tracker),
+            "include_melodic_features": bool(include_melodic_features),
+        },
     }
 
     if cache_path:
@@ -69,7 +80,7 @@ def extract_features_from_manifest(
             )
 
     extractor = BaselineFeatureExtractor(config=config)
-    manifest_items_sorted = sorted(manifest.items, key=lambda x: (x.recording_id, x.split, x.file_path))
+    manifest_items = list(manifest.items)
 
     splits_data: Dict[str, Tuple[List[np.ndarray], List[str], List[str]]] = {
         "train": ([], [], []),
@@ -77,7 +88,7 @@ def extract_features_from_manifest(
         "test": ([], [], []),
     }
 
-    for item in manifest_items_sorted:
+    for item in manifest_items:
         if not Path(item.file_path).exists():
             continue
         try:
@@ -103,13 +114,19 @@ def extract_features_from_manifest(
         arrays = {
             "X_train": X_train,
             "y_train": y_train,
+            "recording_ids_train": np.array(splits_data["train"][2]),
             "ids_train": np.array(splits_data["train"][2]),
+            "splits_train": np.array(["train"] * len(X_train)),
             "X_val": X_val,
             "y_val": y_val,
+            "recording_ids_val": np.array(splits_data["val"][2]),
             "ids_val": np.array(splits_data["val"][2]),
+            "splits_val": np.array(["val"] * len(X_val)),
             "X_test": X_test,
             "y_test": y_test,
+            "recording_ids_test": np.array(splits_data["test"][2]),
             "ids_test": np.array(splits_data["test"][2]),
+            "splits_test": np.array(["test"] * len(X_test)),
         }
         FeatureCacheManager.save_atomic_cache(
             cache_path=cache_path,
@@ -123,8 +140,8 @@ def extract_features_from_manifest(
 def extract_mert_embeddings_from_manifest(
     manifest: DatasetManifest,
     cache_path: Optional[Path | str] = None,
-    model_name: str = "m-a-p/MERT-v1-95M",
-    model_revision: str = "main",
+    model_name: Optional[str] = None,
+    model_revision: Optional[str] = None,
     pooling_type: Literal["mean", "max", "mean_max_concat"] = "mean_max_concat",
     sample_rate: int = 24000,
     max_duration_sec: float = 10.0,
@@ -137,17 +154,30 @@ def extract_mert_embeddings_from_manifest(
     Caches embeddings to disk with strict cache fingerprinting.
     Fails explicitly if audio files are missing or embeddings cannot be generated.
     """
+    effective_model_name = model_name or settings.model.mert_model_name
+    effective_model_revision = model_revision or settings.model.mert_model_revision
+
     # 1. Compute stable manifest and configuration fingerprint
     manifest_hash = compute_manifest_content_fingerprint(manifest.items)
 
     expected_meta = {
-        "model_name": str(model_name),
-        "model_revision": str(model_revision),
+        "dataset_fingerprint": manifest.compute_dataset_fingerprint(),
+        "feature_schema_version": FeatureSchema.SCHEMA_VERSION,
+        "model_name": str(effective_model_name),
+        "model_revision": str(effective_model_revision),
         "pooling_type": str(pooling_type),
         "sample_rate": int(sample_rate),
         "max_duration_sec": float(max_duration_sec),
         "manifest_hash": manifest_hash,
         "items_count": len(manifest.items),
+        "preprocessing_config": {
+            "sample_rate": int(sample_rate),
+            "max_duration_sec": float(max_duration_sec),
+            "pooling_type": str(pooling_type),
+            "batch_size": int(batch_size),
+            "model_name": str(effective_model_name),
+            "model_revision": str(effective_model_revision),
+        },
     }
 
     # 2. Check cache validity
@@ -179,8 +209,8 @@ def extract_mert_embeddings_from_manifest(
     from raga_intelligence.models.mert_encoder import MERTFeatureExtractor
 
     extractor = MERTFeatureExtractor(
-        model_name=model_name,
-        model_revision=model_revision,
+        model_name=effective_model_name,
+        model_revision=effective_model_revision,
         pooling_type=pooling_type,
         device=device,
     )
@@ -193,11 +223,11 @@ def extract_mert_embeddings_from_manifest(
     }
 
     max_samples = int(sample_rate * max_duration_sec)
-    manifest_items_sorted = sorted(manifest.items, key=lambda x: (x.recording_id, x.split, x.file_path))
+    manifest_items = list(manifest.items)
 
     # 5. Extract in batches
-    for i in range(0, len(manifest_items_sorted), batch_size):
-        batch = manifest_items_sorted[i : i + batch_size]
+    for i in range(0, len(manifest_items), batch_size):
+        batch = manifest_items[i : i + batch_size]
         waveforms: List[np.ndarray] = []
         for it in batch:
             try:
@@ -218,8 +248,8 @@ def extract_mert_embeddings_from_manifest(
             splits_data[split_key][1].append(it.raga)
             splits_data[split_key][2].append(it.recording_id)
 
-        if (i + len(batch)) % 50 == 0 or (i + len(batch)) == len(manifest_items_sorted):
-            logger.info(f"Extracted MERT embeddings for {i + len(batch)}/{len(manifest_items_sorted)} clips...")
+        if (i + len(batch)) % 50 == 0 or (i + len(batch)) == len(manifest_items):
+            logger.info(f"Extracted MERT embeddings for {i + len(batch)}/{len(manifest_items)} clips...")
 
     E_train = np.array(splits_data["train"][0], dtype=np.float32) if splits_data["train"][0] else np.empty((0, 0), dtype=np.float32)
     y_train = np.array(splits_data["train"][1])
@@ -235,13 +265,19 @@ def extract_mert_embeddings_from_manifest(
         arrays = {
             "E_train": E_train,
             "y_train": y_train,
+            "recording_ids_train": np.array(splits_data["train"][2]),
             "ids_train": np.array(splits_data["train"][2]),
+            "splits_train": np.array(["train"] * len(E_train)),
             "E_val": E_val,
             "y_val": y_val,
+            "recording_ids_val": np.array(splits_data["val"][2]),
             "ids_val": np.array(splits_data["val"][2]),
+            "splits_val": np.array(["val"] * len(E_val)),
             "E_test": E_test,
             "y_test": y_test,
+            "recording_ids_test": np.array(splits_data["test"][2]),
             "ids_test": np.array(splits_data["test"][2]),
+            "splits_test": np.array(["test"] * len(E_test)),
         }
         FeatureCacheManager.save_atomic_cache(
             cache_path=cache_path,

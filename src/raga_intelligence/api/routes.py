@@ -150,7 +150,18 @@ async def analyze_audio_endpoint(
     tonic_hz: Optional[float] = Form(None, description="Optional known tonic (Sa) in Hz"),
     top_k: int = Form(5, ge=1, le=10, description="Number of candidate ragas to return"),
 ) -> AnalysisResponse:
-    # 1. Validate file extension / mime
+    # 1. Validate parameters & file extension / mime
+    if tonic_hz is not None:
+        import math
+        if math.isnan(tonic_hz) or math.isinf(tonic_hz) or tonic_hz < settings.min_tonic_hz or tonic_hz > settings.max_tonic_hz:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Tonic frequency ({tonic_hz} Hz) is invalid or outside the permitted safe range "
+                    f"[{settings.min_tonic_hz}, {settings.max_tonic_hz}] Hz."
+                ),
+            )
+
     filename = audio_file.filename or "uploaded_audio"
     allowed_extensions = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
     file_ext = "." + filename.split(".")[-1].lower() if "." in filename else ""
@@ -179,7 +190,9 @@ async def analyze_audio_endpoint(
                 total_bytes += len(chunk)
                 if total_bytes > max_bytes:
                     raise HTTPException(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+                        if hasattr(status, "HTTP_413_REQUEST_ENTITY_TOO_LARGE")
+                        else 413,
                         detail="File size exceeds maximum allowed limit (50 MB).",
                     )
                 if not header_validated:

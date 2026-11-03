@@ -95,10 +95,29 @@ class DatasetManifest(BaseModel):
             "unknown_performance_count": unknown_performance_count,
         }
 
+        # 5. Isolation Status Assessment (distinguishing verified isolation from unverifiable incomplete metadata)
+        if len(performer_leakage) > 0:
+            performer_isolation_status = "leaked"
+        elif performer_metadata_complete:
+            performer_isolation_status = "verified_isolated"
+        else:
+            performer_isolation_status = "unverifiable_incomplete_metadata"
+
+        if len(perf_leakage) > 0:
+            performance_isolation_status = "leaked"
+        elif performance_metadata_complete:
+            performance_isolation_status = "verified_isolated"
+        else:
+            performance_isolation_status = "unverifiable_incomplete_metadata"
+
         return {
             "valid_no_recording_leakage": len(rec_leakage) == 0,
             "valid_no_performance_leakage": len(perf_leakage) == 0,
             "valid_no_performer_leakage": len(performer_leakage) == 0,
+            "is_performer_isolation_verified": performer_isolation_status == "verified_isolated",
+            "is_performance_isolation_verified": performance_isolation_status == "verified_isolated",
+            "performer_isolation_status": performer_isolation_status,
+            "performance_isolation_status": performance_isolation_status,
             "leaked_recordings": sorted(list(rec_leakage)),
             "leaked_performances": sorted(list(perf_leakage)),
             "leaked_performers": sorted(list(performer_leakage)),
@@ -112,6 +131,21 @@ class DatasetManifest(BaseModel):
             "performer_overlap_in_test": sorted(list(train_performers & test_performers)),
             "split_summary": split_summary,
         }
+
+    def compute_dataset_fingerprint(self) -> str:
+        """
+        Computes a stable, deterministic SHA256 fingerprint of all dataset items.
+        
+        Includes recording ID, split assignment, canonical raga, tonic, duration,
+        sample rate, performer, and performance identifiers.
+        """
+        import hashlib
+        sorted_items = sorted(self.items, key=lambda x: (x.recording_id, x.split, x.file_path))
+        descriptors = [
+            f"{it.recording_id}:{it.split}:{it.raga}:{it.tonic_hz}:{it.performer}:{it.performance_id}:{it.duration_sec}:{it.sample_rate}"
+            for it in sorted_items
+        ]
+        return hashlib.sha256("|".join(descriptors).encode("utf-8")).hexdigest()
 
     def get_class_counts(self) -> Dict[str, Dict[str, int]]:
         """Returns per-class item counts grouped by split."""

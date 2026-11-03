@@ -37,6 +37,9 @@ def generate_markdown_report(
     if metrics.expected_calibration_error is not None:
         lines.append(f"- **Expected Calibration Error (ECE)**: `{metrics.expected_calibration_error:.4f}`")
 
+    if metrics.n_groups is not None:
+        lines.append(f"- **Independent Resampling Groups**: `{metrics.n_groups}`")
+
     if metrics.confidence_intervals:
         lines.extend([
             "",

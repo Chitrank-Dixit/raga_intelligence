@@ -133,6 +133,7 @@ class FeatureConfig(BaseModel):
 class ModelConfig(BaseModel):
     """Machine learning model settings."""
     mert_model_name: str = "m-a-p/MERT-v1-95M"
+    mert_model_revision: str = "12af15fef9d0ac838c3f475bfbbf26d2060dd4f5"  # Pinned immutable commit hash
     mert_output_dim: int = 768
     num_classes: int = len(RAGA_LIST)
     dropout: float = 0.3
@@ -175,6 +176,8 @@ class Settings(BaseSettings):
     # API
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
+    min_tonic_hz: float = Field(default=50.0, alias="MIN_TONIC_HZ", description="Minimum physically plausible singing tonic frequency in Hz")
+    max_tonic_hz: float = Field(default=1000.0, alias="MAX_TONIC_HZ", description="Maximum physically plausible singing tonic frequency in Hz")
 
     # CORS Configuration
     cors_allowed_origins: List[str] = Field(

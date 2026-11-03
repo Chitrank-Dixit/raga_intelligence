@@ -1,10 +1,12 @@
 """
 Lightweight JSON-based experiment tracking, environment introspection, and experiment logging.
+Persists complete cryptographic and environment provenance for scientific reproducibility.
 """
 
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -16,6 +18,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import torch
+
+from raga_intelligence.config import settings
+from raga_intelligence.features.schema import FeatureSchema
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +43,22 @@ def get_git_commit_hash() -> str:
     return "unknown_or_uncommitted"
 
 
+def get_lockfile_hash() -> str:
+    """Computes sha256 of uv.lock if present."""
+    p = Path("uv.lock")
+    if p.exists():
+        try:
+            return hashlib.sha256(p.read_bytes()).hexdigest()
+        except Exception:
+            pass
+    return "missing"
+
+
 def get_environment_metadata() -> Dict[str, Any]:
-    """Inspects and returns the hardware, OS, and key ML library environment versions."""
+    """Inspects and returns the hardware, OS, lockfile, and key ML library environment versions."""
     import librosa
+    import numpy
+    import scipy
     import sklearn
     import transformers
 
@@ -55,6 +73,16 @@ def get_environment_metadata() -> Dict[str, Any]:
         "transformers_version": transformers.__version__,
         "librosa_version": librosa.__version__,
         "sklearn_version": sklearn.__version__,
+        "lockfile_hash": get_lockfile_hash(),
+        "packages": {
+            "torch": torch.__version__,
+            "torchaudio": getattr(torch, "torchaudio", "N/A"),
+            "transformers": transformers.__version__,
+            "librosa": librosa.__version__,
+            "sklearn": sklearn.__version__,
+            "numpy": numpy.__version__,
+            "scipy": scipy.__version__,
+        },
         "cuda_available": cuda_available,
         "device_name": gpu_name,
     }
@@ -62,7 +90,7 @@ def get_environment_metadata() -> Dict[str, Any]:
 
 @dataclass
 class ExperimentRecord:
-    """Structured record of a single evaluated experiment run."""
+    """Structured record of a single evaluated experiment run with complete provenance."""
     run_id: str
     experiment_name: str
     timestamp: str
@@ -76,6 +104,13 @@ class ExperimentRecord:
     dataset_split_info: Dict[str, Any]
     metrics: Dict[str, Any]
     system_environment: Dict[str, Any]
+    dataset_fingerprint: str = ""
+    dataset_version: str = "1.0.0"
+    recording_ids_per_split: Dict[str, List[str]] = field(default_factory=dict)
+    cache_fingerprints: Dict[str, str] = field(default_factory=dict)
+    feature_schema_version: str = "1.0.0"
+    mert_model_revision: str = "12af15fef9d0ac838c3f475bfbbf26d2060dd4f5"
+    lockfile_hash: str = ""
     notes: Optional[str] = None
 
 
@@ -99,6 +134,12 @@ class ExperimentTracker:
         metrics: Dict[str, Any],
         dataset_name: str = "HindustaniRaagSmall",
         dataset_split_info: Optional[Dict[str, Any]] = None,
+        dataset_fingerprint: Optional[str] = None,
+        dataset_version: str = "1.0.0",
+        recording_ids_per_split: Optional[Dict[str, List[str]]] = None,
+        cache_fingerprints: Optional[Dict[str, str]] = None,
+        feature_schema_version: Optional[str] = None,
+        mert_model_revision: Optional[str] = None,
         notes: Optional[str] = None,
         run_id: Optional[str] = None,
     ) -> ExperimentRecord:
@@ -112,6 +153,7 @@ class ExperimentTracker:
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
         code_version = get_git_commit_hash()
         env_meta = get_environment_metadata()
+        lock_hash = get_lockfile_hash()
 
         record = ExperimentRecord(
             run_id=run_id,
@@ -127,6 +169,13 @@ class ExperimentTracker:
             dataset_split_info=dataset_split_info or {},
             metrics=metrics,
             system_environment=env_meta,
+            dataset_fingerprint=dataset_fingerprint or "",
+            dataset_version=dataset_version,
+            recording_ids_per_split=recording_ids_per_split or {},
+            cache_fingerprints=cache_fingerprints or {},
+            feature_schema_version=feature_schema_version or FeatureSchema.SCHEMA_VERSION,
+            mert_model_revision=mert_model_revision or settings.model.mert_model_revision,
+            lockfile_hash=lock_hash,
             notes=notes,
         )
 
@@ -134,7 +183,7 @@ class ExperimentTracker:
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(asdict(record), f, indent=2)
 
-        logger.info(f"Logged experiment run '{run_id}' to {file_path}")
+        logger.info(f"Logged experiment run '{run_id}' with full provenance to {file_path}")
         return record
 
     def get_run(self, run_id: str) -> Optional[ExperimentRecord]:

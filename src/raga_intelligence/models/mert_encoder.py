@@ -30,8 +30,8 @@ class MERTFeatureExtractor(nn.Module):
 
     def __init__(
         self,
-        model_name: str = "m-a-p/MERT-v1-95M",
-        model_revision: str = "main",
+        model_name: str = settings.model.mert_model_name,
+        model_revision: str = settings.model.mert_model_revision,
         pooling_type: Literal["mean", "max", "mean_max_concat"] = "mean_max_concat",
         device: Optional[torch.device] = None,
         freeze: bool = True,
