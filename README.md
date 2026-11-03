@@ -150,6 +150,9 @@ python scripts/evaluate.py "path/to/song.mp3" --top-k 5
 # Run cross-genre evaluation benchmark
 python scripts/evaluate_cross_genre.py
 
+# Audit the configured Hindustani dataset without modifying it
+python scripts/audit_dataset.py
+
 # Train baseline SVM on Hindustani dataset
 python scripts/train.py --dataset hindustani --model baseline --classifier-type svm
 

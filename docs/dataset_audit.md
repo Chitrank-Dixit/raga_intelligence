@@ -1,0 +1,32 @@
+# Dataset quality audit
+
+Run `python scripts/audit_dataset.py` to audit the configured
+`DATA_DIR/hindustani_dataset` dataset. Pass `--dataset-dir` to inspect another
+CSV-backed dataset, `--metadata-file` to select its manifest, and `--output-dir`
+to choose where JSON and Markdown reports are written. Report output must be
+outside the dataset root. The default outputs are
+`reports/dataset_audit/dataset_audit.json` and
+`reports/dataset_audit/dataset_audit.md`.
+
+The audit reads each manifest row, hashes audio in chunks, and decodes one audio
+file at a time with Librosa. It does not edit audio, metadata, caches, or
+experiment records. It reports raw labels as well as labels mapped to the
+configured canonical raga vocabulary. A filename-derived performance identity
+is used only when the CSV has no performance identity column and the existing
+adapter's bracketed ID convention matches; its origin is marked in JSON. A
+present but empty or unknown identity field remains unknown. Performer IDs are
+read only from performer/artist metadata and are never inferred from recording
+or performance IDs.
+
+Missing referenced files, unreadable audio, duplicate recording IDs, invalid
+annotations, leakage, and incomplete canonical train/test coverage are errors
+and give the CLI a nonzero status. Missing performer or rights/provenance fields
+are warnings. Audio fingerprints are unavailable if any referenced file cannot
+be hashed. Reports omit absolute dataset paths and include relative audio paths.
+Evaluation readiness is calculated for rows with labels in the configured
+canonical raga vocabulary; dataset-wide integrity findings remain separately
+reported and can still make the CLI return nonzero.
+
+The metadata fingerprint covers normalized manifest facts and relative paths.
+The audio content fingerprint is a separate hash over relative paths and file
+SHA-256 values and is unavailable unless every referenced file can be hashed.
