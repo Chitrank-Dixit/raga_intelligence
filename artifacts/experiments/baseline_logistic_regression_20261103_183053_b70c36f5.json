@@ -1,70 +1,68 @@
 {
-  "run_id": "frozen_mert_head_20261103_133547_d55b1d90",
-  "experiment_name": "Frozen MERT Head",
-  "timestamp": "2026-11-03T13:35:47.819741+00:00",
-  "code_version": "e83b768d5b1cf84e0278ac902d0db7b939435ee2",
+  "run_id": "baseline_logistic_regression_20261103_183053_b70c36f5",
+  "experiment_name": "Baseline Logistic Regression",
+  "timestamp": "2026-11-03T18:30:53.444372+00:00",
+  "code_version": "c5731c6d74e761f4b38c4f3e3b6368858389a076",
   "seed": 42,
-  "model_name": "Frozen MERT (95M)",
-  "model_architecture": "MERTClassifierHead(Linear(1536->128)->GELU->Linear(128->10))",
+  "model_name": "Logistic Regression",
+  "model_architecture": "LogisticRegression(max_iter=1000)",
   "hyperparameters": {
-    "epochs": 25,
-    "lr": 0.001,
-    "weight_decay": 0.01
+    "max_iter": 1000
   },
   "feature_config": {
-    "type": "mert_embeddings",
-    "dim": 1536
+    "type": "handcrafted_35",
+    "dim": 35
   },
   "dataset_name": "HindustaniRaagSmall",
   "dataset_split_info": {},
   "metrics": {
-    "accuracy": 0.3333,
-    "macro_f1": 0.244,
-    "weighted_f1": 0.244,
-    "multiclass_log_loss": 2.1941,
-    "brier_score": 0.8572,
-    "expected_calibration_error": 0.0811,
+    "accuracy": 0.5333,
+    "macro_f1": 0.54,
+    "weighted_f1": 0.54,
+    "multiclass_log_loss": 7.731,
+    "brier_score": 1.3532,
+    "expected_calibration_error": 0.5507,
     "confidence_intervals": {
       "accuracy": {
-        "ci_lower": 0.1333,
-        "ci_upper": 0.5667,
-        "mean": 0.3312,
-        "std": 0.1136,
+        "ci_lower": 0.3333,
+        "ci_upper": 0.7008,
+        "mean": 0.5319,
+        "std": 0.0958,
         "n_groups": 10.0
       },
       "macro_f1": {
-        "ci_lower": 0.0714,
-        "ci_upper": 0.2828,
-        "mean": 0.1775,
-        "std": 0.0551,
+        "ci_lower": 0.2353,
+        "ci_upper": 0.5124,
+        "mean": 0.3722,
+        "std": 0.0732,
         "n_groups": 10.0
       },
       "weighted_f1": {
-        "ci_lower": 0.0873,
-        "ci_upper": 0.5271,
-        "mean": 0.2886,
-        "std": 0.1146,
+        "ci_lower": 0.3904,
+        "ci_upper": 0.77,
+        "mean": 0.5829,
+        "std": 0.0982,
         "n_groups": 10.0
       },
       "brier_score": {
-        "ci_lower": 0.7261,
-        "ci_upper": 0.9704,
-        "mean": 0.8575,
-        "std": 0.063,
+        "ci_lower": 1.1433,
+        "ci_upper": 1.5665,
+        "mean": 1.3528,
+        "std": 0.1072,
         "n_groups": 10.0
       },
       "log_loss": {
-        "ci_lower": 1.6571,
-        "ci_upper": 2.7384,
-        "mean": 2.1985,
-        "std": 0.2759,
+        "ci_lower": 4.9319,
+        "ci_upper": 11.9325,
+        "mean": 7.691,
+        "std": 1.8029,
         "n_groups": 10.0
       },
       "ece": {
-        "ci_lower": 0.045,
-        "ci_upper": 0.3425,
-        "mean": 0.1618,
-        "std": 0.0745,
+        "ci_lower": 0.4265,
+        "ci_upper": 0.6951,
+        "mean": 0.5511,
+        "std": 0.0682,
         "n_groups": 10.0
       }
     }
@@ -90,7 +88,7 @@
     "cuda_available": false,
     "device_name": "None (CPU)"
   },
-  "dataset_fingerprint": "3b199ef62f88aa8e225deb73b04fd349f391a10d224810360cefec7c93af6f18",
+  "dataset_fingerprint": "252c55be0ff9dc4375bd38d796ffe5fa33ea43a28cd0daac2b1a6e4eaf88c823",
   "dataset_version": "1.0.0",
   "recording_ids_per_split": {
     "train": [
@@ -488,12 +486,19 @@
       "test_[0suZMP8FE9Y]_chunk2"
     ]
   },
+  "evaluation_split_fingerprint": "b5ba9f621f933b29b76fe0909fa99fa37ced8cc10626d8c2f0a169c91f54f171",
   "cache_fingerprints": {
-    "features_cache": "./artifacts/cache/hindustani_features.npz",
-    "mert_cache": "./artifacts/cache/hindustani_mert_embeddings.npz"
+    "features_cache_path": "D:\\Projects\\raga_intelligence\\artifacts\\cache\\hindustani_features.npz",
+    "features_cache_sha256": "ac64eda3ed42dcea561e36e65a27628cd2ca307326bdf680c1f256110c4ce54c",
+    "mert_cache_path": "D:\\Projects\\raga_intelligence\\artifacts\\cache\\hindustani_mert_embeddings.npz",
+    "mert_cache_sha256": "feb63cae5f61acacc309f2b82f8829a120065aa68917249a5ce452e80f5eb7db"
   },
   "feature_schema_version": "1.0.0",
   "mert_model_revision": "12af15fef9d0ac838c3f475bfbbf26d2060dd4f5",
   "lockfile_hash": "cf8239ba12fe3e9a23886a7b102824d8c19bb7a667ec11deccaf060d57c7e00d",
-  "notes": "Phase 2.1 Scientific Benchmark"
+  "notes": "Phase 2.1 Scientific Benchmark",
+  "working_tree_dirty": false,
+  "working_tree_fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "evaluation_id": "85880373f06540f98a77637907727180",
+  "fingerprint_policy": "audio_sha256_v1"
 }

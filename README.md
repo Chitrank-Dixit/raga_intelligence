@@ -114,7 +114,7 @@ The initial research cohort covers 10 representative Hindustani ragas across div
 
 ## 8. Empirical Benchmark Results
 
-Canonical scientific evaluation completed on clean commit `b894d85b7bf4dfc0d4e31bb1bfa3ce1a0369185d` (evaluation `0e7c1a57ddd34642a484913cca5737fc`). Dataset audio-inclusive fingerprint: `252c55be0ff9dc4375bd38d796ffe5fa33ea43a28cd0daac2b1a6e4eaf88c823` (`audio_sha256_v1`); split fingerprint: `b5ba9f621f933b29b76fe0909fa99fa37ced8cc10626d8c2f0a169c91f54f171`. The corpus has 390 clips (360 train / 30 held-out), 82 performance/source groups and 10 test performance clusters. Recording and performance isolation are verified; performer isolation is **not verifiable** because artist metadata is absent. These are not artist-independent results.
+Canonical scientific evaluation completed on clean commit `c5731c6d74e761f4b38c4f3e3b6368858389a076` (evaluation `85880373f06540f98a77637907727180`). Dataset audio-inclusive fingerprint: `252c55be0ff9dc4375bd38d796ffe5fa33ea43a28cd0daac2b1a6e4eaf88c823` (`audio_sha256_v1`); split fingerprint: `b5ba9f621f933b29b76fe0909fa99fa37ced8cc10626d8c2f0a169c91f54f171`. The corpus has 390 clips (360 train / 30 held-out), 82 performance/source groups and 10 test performance clusters. Recording and performance isolation are verified; performer isolation is **not verifiable** because artist metadata is absent. These are not artist-independent results.
 
 | Model | Macro-F1 (mean +/- seed SD) | Accuracy (mean +/- seed SD) | Evaluation configuration |
 | :--- | :---: | :---: | :--- |

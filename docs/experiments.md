@@ -144,95 +144,28 @@ Experiments are structured into three distinct status tiers:
 
 ---
 
-### Experiment 6: Phase 2.1 — Scientific Evaluation Framework & Multi-Seed Benchmarks
-- **Objective**: Establish a rigorous, reproducible, group-isolated evaluation protocol with expanded statistical metrics, cluster bootstrap confidence intervals, feature ablation, and automated error diagnostics.
-- **Protocol**:
-  - **Dataset**: Hindustani classical audio collection (390 clips across 10 canonical ragas).
-  - **Group Isolation**: The historical split grouped by performance/source ID. Artist-level leakage was not verifiable from the available metadata.
-  - **Multi-Seed Testing**: Evaluated across 3 deterministic random seeds (`[42, 123, 999]`) on strictly identical held-out test partitions.
-  - **Statistical Resampling**: 1,000 cluster bootstrap draws at the performance/source level (never treating non-independent audio chunks as i.i.d.).
-  - **Cryptographic Provenance**: Exact cache file paths and streaming SHA-256 digests (`da9170fec4d680183b6f31d4a27e98dddcd858c97ee3df1d735f34f5cc43621e` for handcrafted features, `d13f6f4878167e258d0b350575a63975685491f9f8af51c2136f8b93c1d3c9c8` for MERT embeddings) are verified and persisted in all experiment logs.
-  - **Statistical Clarity**: Seed variation (Mean ± Std across seeds) quantifies algorithm optimization stability to initialization and training order; it is explicitly distinguished from test-sample generalization uncertainty (cluster bootstrap 95% CIs).
-- **Consolidated Multi-Seed Benchmark Results**:
-  | Model Architecture | Macro-F1 (Mean ± Std) | Accuracy (Mean ± Std) | Weighted-F1 | Log Loss | Brier Score | ECE |
-  | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-  | **Handcrafted (SVM)** | `0.4663 ± 0.0000` | `0.4667 ± 0.0000` | `0.4663` | `3.9909` | `1.2032` | `0.4282` |
-  | **Handcrafted (Random Forest)** | `0.4664 ± 0.0398` | `0.4778 ± 0.0416` | `0.4664` | `5.0702` | `1.0270` | `0.2443` |
-  | **Handcrafted (Logistic Regression)** | `0.6488 ± 0.0000` | `0.7333 ± 0.0000` | `0.6488` | `7.9233` | `1.4922` | `0.6791` |
-  | **Frozen MERT (95M)** | `0.2751 ± 0.0287` | `0.3778 ± 0.0314` | `0.2751` | `2.1511` | `0.8229` | `0.1179` |
-  | **Hybrid (Pitch + MERT)** | `0.7022 ± 0.0412` | `0.7222 ± 0.0314` | `0.7022` | `0.9758` | `0.4516` | `0.1737` |
+### Experiment 6: Phase 2.1 - Scientific Evaluation Framework & Multi-Seed Benchmarks
 
-- **Primary Seed 95% Cluster Bootstrap Confidence Intervals**:
-  > [!WARNING]
-  > **Small-Sample Cluster Limitation**: The test partition contains 10 independent clusters (<15). Asymptotic cluster bootstrap coverage may exhibit downward bias; interpret confidence intervals with caution.
-  
-  - **Hybrid Late Fusion**:
-    - Accuracy: `0.7667` (95% CI: `[0.5667, 0.9333]`, Std: `0.0959`)
-    - Macro-F1: `0.7603` (95% CI: `[0.3399, 0.6868]`, Std: `0.0927`)
-    - Brier Score: `0.4450` (95% CI: `[0.2338, 0.6900]`, Std: `0.1184`)
-  - **Handcrafted SVM**:
-    - Accuracy: `0.4667` (95% CI: `[0.2667, 0.6342]`, Std: `0.0963`)
-    - Macro-F1: `0.4663` (95% CI: `[0.1853, 0.4591]`, Std: `0.0719`)
-    - Brier Score: `1.1951` (95% CI: `[1.0139, 1.3656]`, Std: `0.0942`)
-
-- **Feature Group Ablation Summary**:
-  | Feature Group | Dims | Accuracy | Macro-F1 | Delta Macro-F1 | Log Loss | Brier Score |
-  | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-  | **all_handcrafted_35** | 35 | `0.4667` | `0.4663` | `0.0000 (ref)` | `3.9826` | `1.1951` |
-  | **pcd** | 12 | `0.4000` | `0.3667` | `-0.0997` | `3.9090` | `1.2287` |
-  | **chroma** | 12 | `0.3667` | `0.3044` | `-0.1620` | `3.5526` | `1.1830` |
-  | **pitch_combined** | 24 | `0.4667` | `0.4806` | `+0.0142` | `4.0496` | `1.2607` |
-  | **spectral** | 10 | `0.1333` | `0.1333` | `-0.3330` | `2.9106` | `1.0470` |
-  | **voiced** | 1 | `0.1000` | `0.0187` | `-0.4476` | `2.3392` | `0.9091` |
-  | **spectral_and_voiced** | 11 | `0.1333` | `0.1333` | `-0.3330` | `2.9014` | `1.0510` |
-  | **mert_embeddings** | 1536 | `0.5000` | `0.4112` | `-0.0552` | `3.4537` | `1.2039` |
-  | **hybrid_all** | 1571 | `0.4667` | `0.3512` | `-0.1151` | `3.5249` | `1.2182` |
-
-- **Key Musicological Error Analysis Findings**:
-  - **Bhoopali vs. Deshkar**: Confused due to identical pentatonic pitch sets (`S R G P D`). Static PCDs cannot separate them without temporal melodic contours (*chalan*) and register emphasis.
-  - **Darbari Kanada vs. Deshkar**: In short excerpts, slow andolans and glides on komal Ga/Dha can appear unvoiced or obscured, producing false positive Deshkar predictions.
-  - **Acoustic Quality Correlation**: Lower voiced frames exhibit slightly elevated misclassification risk, confirming the need for confidence calibration and abstention.
-- **Status**: Completed & Verified. Automated execution script `scripts/run_scientific_evaluation.py`, complete report in `reports/scientific_evaluation_report.md`, and 60 run logs stored in `artifacts/experiments/`.
+- **Current report**: `reports/scientific_evaluation_report.md`
+- **Canonical evaluation ID**: `85880373f06540f98a77637907727180`
+- **Code revision**: `c5731c6d74e761f4b38c4f3e3b6368858389a076` (clean working tree)
+- **Dataset fingerprint**: `252c55be0ff9dc4375bd38d796ffe5fa33ea43a28cd0daac2b1a6e4eaf88c823` (`audio_sha256_v1`)
+- **Evaluation split fingerprint**: `b5ba9f621f933b29b76fe0909fa99fa37ced8cc10626d8c2f0a169c91f54f171`
+- **Lockfile SHA-256**: `cf8239ba12fe3e9a23886a7b102824d8c19bb7a667ec11deccaf060d57c7e00d`
+- **Configuration**: seeds `[42, 123, 999]`, CPU, MERT revision `12af15fef9d0ac838c3f475bfbbf26d2060dd4f5`. Full configurations and metrics are generated in the report and its 15 records for this evaluation ID.
+- **Leakage audit**: recording and performance isolation are verified; performer isolation is not verifiable because the corpus has no artist metadata.
+- **Retained records**: 15 current canonical records and 15 records from the previous clean evaluation (`b894d85b7bf4dfc0d4e31bb1bfa3ce1a0369185d`, evaluation `0e7c1a57ddd34642a484913cca5737fc`) retained as historical. The report generator selects only the current evaluation ID.
+- **Curated records**: 60 older experiment JSONs were removed after provenance review. They lacked an evaluation ID and clean-tree/split provenance (and the earliest 30 also lacked a dataset fingerprint), so they could not be tied to a complete reproducible report. The canonical ablation artifact is retained.
 
 ---
 
-## 2.1 Remediation & Security Hardening Verification
+## 2.1 Final Remediation & Validation Record
 
-All findings from the PR #1 review remediation have been addressed and validated:
-
-1. **Cache Integrity & Cryptographic Reproducibility**:
-   - Implemented `compute_file_sha256()` streaming file hash computation for exact cache arrays loaded during evaluation.
-   - Evaluated cache files are verified and logged:
-     - Handcrafted cache (`artifacts/cache/hindustani_features.npz`): `da9170fec4d680183b6f31d4a27e98dddcd858c97ee3df1d735f34f5cc43621e`
-     - MERT cache (`artifacts/cache/hindustani_mert_embeddings.npz`): `d13f6f4878167e258d0b350575a63975685491f9f8af51c2136f8b93c1d3c9c8`
-   - Verified that mutating or replacing cache contents immediately alters the recorded SHA-256 fingerprint.
-
-2. **Audio Dataset Fingerprinting Architecture**:
-   - Clarified the operational distinction between **metadata fingerprints** and **audio-content fingerprints**:
-     - **Metadata Fingerprint** (`compute_metadata_fingerprint()`): Deterministic SHA-256 over recording ID, split assignment, canonical raga label, ground-truth tonic (Sa), performer, performance ID, duration, and sample rate. Guarantees that annotations and splits have not drifted without reading raw audio files.
-     - **Audio-Content Fingerprint** (`compute_audio_content_fingerprint()`): Deterministic SHA-256 over the raw audio byte hashes (`audio_sha256`) of every recording. Guarantees that audio waveforms have not been truncated, modified, or corrupted on disk.
-     - Modifying any audio file on disk immediately invalidates the audio fingerprint and downstream feature caches.
-
-3. **Statistical Reporting Rigor**:
-   - Replaced all hard-coded cluster references with dynamic group counts ($n=10$ independent performance clusters across 30 test clips).
-   - Added an explicit statistical warning when independent cluster counts are small ($n < 15$).
-   - Explicitly distinguished model optimization variability across random seeds (Mean ± Std) from test-sample generalization uncertainty (cluster bootstrap 95% CIs).
-   - Removed any characterization of seed standard deviation as a confidence interval.
-
-4. **Group Partitioning Edge Cases & Infeasibility Diagnostics**:
-   - Implemented bipartite graph connected component analysis in `GroupAwarePartitioner.audit_grouping()`.
-   - Identified multi-raga performer cycle constraints (e.g. 3-cycle loops $P_1 \to \{A, B\}, P_2 \to \{B, C\}, P_3 \to \{C, A\}$ where strict isolation prevents dual-split class representation).
-   - Populated explicit `impossible_coverage_ragas` diagnostics instead of silently omitting classes.
-   - Added `strict_coverage: bool = False` flag; when `True`, raises `InfeasiblePartitionError` with full audit diagnostics.
-
-5. **API Resource Protection & Concurrency Limits**:
-   - Added configurable `max_concurrent_inferences: int = 4` (`MAX_CONCURRENT_INFERENCES`) and `inference_retry_after_sec: int = 2` (`INFERENCE_RETRY_AFTER_SEC`).
-   - Saturated inference requests are rejected with predictable `HTTP 503 Service Unavailable` and a valid `Retry-After` header.
-   - Guaranteed atomic temporary file unlinking and capacity release in `finally:` blocks during client cancellations (`asyncio.CancelledError`) and decoder failures (`AudioFileError`).
-
-6. **Automated Test Suite Verification**:
-   - **Host (Windows 11, Python 3.12.6)**: **118 / 118 passed** in 16.02s (`uv run pytest tests/`).
-   - **Container (Linux, Podman 6.1.4, Python 3.12.16)**: **117 passed, 1 skipped** (GPU test skipped gracefully) in 57.16s (`localhost/raga-intelligence:latest`).
+- **Leakage semantics**: legacy no-leakage booleans are true only when isolation is verified. Missing performer or performance metadata produces `not_verifiable` and a false boolean; observed overlap produces `failed`.
+- **Strict scientific partitioning**: evaluation rejects infeasible performance-group structure or any canonical raga missing from train or test before reading caches or constructing model evaluators. The final run passed with all 10 ragas covered and 82 performance/source groups.
+- **Test suite**: 136 tests passed on the remediation code revision; integration tests include rejection before cache/model evaluation.
+- **Ruff**: not run because Ruff is not installed/cached in the offline environment. No configured type checker was found.
+- **Podman**: image build could not be validated because the existing Podman machine identity was inaccessible (`Access is denied`). Podman and WSL configuration were not changed.
 
 ---
 
@@ -253,11 +186,7 @@ All findings from the PR #1 review remediation have been addressed and validated
 
 ## 4. Methodological Limitations: Small Held-Out Test Sets
 
-The held-out test partition in the Hindustani Raag dataset contains **30 recordings** (exactly 3 clips per canonical raga). The implications of this test set size must be explicitly understood:
-
-1. **Granularity & Variance**: Each individual test clip accounts for $1/3 \approx 33.3\%$ of the per-class recall for that raga, and $1/30 \approx 3.33\%$ of the overall accuracy. A single misclassification shifts the per-class metric substantially.
-2. **Confidence Intervals**: With $N=30$ and an observed accuracy of $76.67\%$, the 95% Wilson score confidence interval spans approximately $[59.1\%, 88.2\%]$. While the margin over random baseline ($10.0\%$) is statistically significant ($p < 10^{-6}$), differences between adjacent model variants require caution.
-3. **Generalization Beyond Cohort**: The old corpus provides performance/source isolation only. Performer-level isolation remains unverified; testing with curated artist metadata and broader corpora is needed before making claims about unseen performers.
+The canonical held-out partition contains 30 recordings across 10 ragas and 10 independent performance/source clusters. The report includes cluster-bootstrap uncertainty and warns that estimates from fewer than 15 clusters may have limited coverage. The split establishes performance-level isolation only; performer-level isolation remains unverifiable because artist identities are not present in the dataset metadata. Results should not be read as evidence of generalization to unseen performers.
 
 ---
 
