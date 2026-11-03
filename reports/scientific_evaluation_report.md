@@ -1,19 +1,19 @@
 # Scientific Evaluation Report: Indian Classical Raga Recognition
-
-> **Canonical benchmark pending.** This historical report was generated from a dirty working tree. Its prior performer-isolation claim used video/source IDs as artist identities and is invalid. The metrics below are retained for audit only; they are not current results. Replace this report only after a complete evaluation from a clean commit.
 **Phase**: Phase 2.1 — Scientific Evaluation Framework
 **Execution Device**: `cpu`
 **Seeds Evaluated**: `[42, 123, 999]`
 **Primary Seed**: `42`
-**Dataset Fingerprint (audio SHA-256 included)**: `f50e4843589290dfe26ad2d4a40574d4664c948aba465a3167a2f156bbc33308`
-**Code Revision (Git commit)**: `1d50952a75c3fb4665ae63acc2587e8071552106`
-**Working Tree Dirty**: `True`
-**Working Tree Fingerprint**: `20b4f51e28c142163b0e2b3d83c27a64786823db2f8071b2bb66eb88e9d5a867`
+**Dataset Fingerprint (audio SHA-256 included)**: `252c55be0ff9dc4375bd38d796ffe5fa33ea43a28cd0daac2b1a6e4eaf88c823`
+**Fingerprint Policy**: `audio_sha256_v1`
+**Code Revision (Git commit)**: `b894d85b7bf4dfc0d4e31bb1bfa3ce1a0369185d`
+**Working Tree Clean**: `True`
+**Lockfile SHA-256**: `cf8239ba12fe3e9a23886a7b102824d8c19bb7a667ec11deccaf060d57c7e00d`
 **Evaluation Split Fingerprint**: `b5ba9f621f933b29b76fe0909fa99fa37ced8cc10626d8c2f0a169c91f54f171`
 **MERT Model Revision**: `12af15fef9d0ac838c3f475bfbbf26d2060dd4f5`
+**Canonical Evaluation**: `True`
 
 ## 1. Executive Summary & Core Findings
-This historical report evaluated 10 canonical ragas using the Hindustani audio corpus (390 clips total, 360 train, 30 held-out test). Recording and performance/source groups were partitioned across splits. Performer isolation was not verifiable because the dataset contains no artist metadata. Statistical uncertainty used non-parametric cluster bootstrap resampling (1000 draws) at the performance/source level.
+This report provides an empirical, statistically grounded benchmark of Indian classical raga recognition across 10 canonical ragas using the Hindustani audio corpus (390 clips total, 360 train, 30 held-out test). All models are evaluated on the same held-out split. Recording and performance isolation are audited; performer isolation status is `not_verifiable`. Statistical uncertainty is computed using non-parametric cluster bootstrap resampling (1000 draws) at the performance/source level to preserve intra-recording correlation.
 
 ### Key Takeaways
 1. **Baseline Superiority of Tonic-Relative Handcrafted Features**: The handcrafted SVM baseline achieves **Macro-F1 of 0.4086 ± 0.0000** and Accuracy of **0.4333 ± 0.0000**, substantially exceeding random chance (0.1000).
@@ -33,8 +33,17 @@ Comparison across Handcrafted Baselines (SVM, Random Forest, Logistic Regression
 | **Frozen MERT (95M)** | `0.2671 ± 0.0328` | `0.3667 ± 0.0272` | `0.2671` | `2.2286` | `0.8329` | `0.1334` |
 | **Hybrid (Pitch + MERT)** | `0.4902 ± 0.0469` | `0.4889 ± 0.0567` | `0.4902` | `1.4688` | `0.6796` | `0.2597` |
 
+## Model Configurations and Seeds
+| Model | Architecture | Hyperparameters | Features | Seeds |
+| :--- | :--- | :--- | :--- | :--- |
+| Baseline SVM | `SVC(kernel=rbf, C=10.0)` | `{"C": 10.0, "kernel": "rbf"}` | `{"dim": 35, "type": "handcrafted_35"}` | `[42, 123, 999]` |
+| Frozen MERT (95M) | `MERTClassifierHead(Linear(1536->128)->GELU->Linear(128->10))` | `{"epochs": 25, "lr": 0.001, "weight_decay": 0.01}` | `{"dim": 1536, "type": "mert_embeddings"}` | `[42, 123, 999]` |
+| Hybrid (Pitch + MERT) | `HybridRagaClassifier(DualStream->GELU->LateFusion)` | `{"epochs": 25, "lr": 0.001, "weight_decay": 0.01}` | `{"mert_dim": 1536, "musical_dim": 35, "type": "hybrid"}` | `[42, 123, 999]` |
+| Logistic Regression | `LogisticRegression(max_iter=1000)` | `{"max_iter": 1000}` | `{"dim": 35, "type": "handcrafted_35"}` | `[42, 123, 999]` |
+| Random Forest | `RandomForestClassifier(n_estimators=100, max_depth=12)` | `{"max_depth": 12, "n_estimators": 100}` | `{"dim": 35, "type": "handcrafted_35"}` | `[42, 123, 999]` |
+
 ### Primary Seed (42) Statistical Generalization Uncertainty (95% Cluster Bootstrap)
-Resampling performed over 10 unique performance groups (30 test clips). It does not establish generalization to unseen performers.
+Resampling performed over 10 unique performance groups (30 test clips). Quantifies generalization bounds to unseen performances, not performers.
 
 > [!WARNING]
 > **Small-Sample Cluster Limitation**: The test partition contains 10 independent clusters (<15). Asymptotic cluster bootstrap coverage may exhibit downward bias; interpret confidence intervals with caution.
@@ -135,9 +144,9 @@ Evaluates the individual and grouped discriminative power of musical features on
 - **Distinct Performances**: `82`
 - **Full Partitionability across all Ragas**: `Yes`
 - **Data Leakage Verification**:
-  - Recording Isolation: `verified` in this historical run
-  - Performance Isolation: `verified` in this historical run
-  - Performer Isolation: `not_verifiable` (artist metadata unavailable)
+  - Recording Isolation: `verified`
+  - Performance Isolation: `verified`
+  - Performer Isolation: `not_verifiable`
 
 ### Grouping Limitations & Observations
 - **Bageshree**: 9 distinct performances
@@ -161,4 +170,6 @@ Evaluates the individual and grouped discriminative power of musical features on
 - **Scikit-Learn Version**: `1.9.1`
 - **Transformers Version**: `5.22.1`
 - **Device Used**: `cpu`
-- **Experiment Tracker Logs**: Stored as individual JSON records in `./artifacts/experiments/`
+- **Experiment ID**: `0e7c1a57ddd34642a484913cca5737fc`
+- **Current Evaluation Records**: `15` records in `./artifacts/experiments/`
+- **Lockfile SHA-256**: `cf8239ba12fe3e9a23886a7b102824d8c19bb7a667ec11deccaf060d57c7e00d`

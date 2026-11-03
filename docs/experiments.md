@@ -4,7 +4,7 @@
 > **Notice on Historical / Superseded Hybrid Benchmarks**
 > In early prototyping (commit `7525287`), the hybrid training script contained a synthetic fallback (`rng.standard_normal((len(X_train), mert_dim))`) when cached MERT representations were not yet extracted. Any early figures reported under that ungrounded configuration are **INVALIDATED AND SUPERSEDED**. They are preserved in the historical section below strictly for auditability and must **never** be cited as evidence of MERT representation capability.
 >
-> **Historical registry:** Existing figures below document earlier experiments and are not the current canonical benchmark. The Hindustani CSV has no artist field; previous use of video IDs as performer labels was invalid. Artist-level isolation is unverifiable for that corpus. The current scientific report remains pending until a clean-commit evaluation succeeds.
+> **Historical registry:** Existing figures below document earlier experiments and are not the current canonical benchmark. The Hindustani CSV has no artist field; previous use of video IDs as performer labels was invalid. Artist-level isolation is unverifiable for that corpus. The current scientific report is generated from clean commit `b894d85b7bf4dfc0d4e31bb1bfa3ce1a0369185d` (evaluation `0e7c1a57ddd34642a484913cca5737fc`); recording/performance isolation are verified and artist isolation remains unverifiable.
 
 ---
 
@@ -20,7 +20,7 @@ Experiments are structured into three distinct status tiers:
 | **Exp 3** | Real Hybrid Pitch + MERT Late Fusion | **Completed & Verified** | `artifacts/checkpoints/hybrid_hindustani_model.pt` |
 | **Exp 4** | Empirical Raga Reference Centroids | **Completed & Verified** | `src/raga_intelligence/similarity/prototypes.py` |
 | **Exp 5** | Cross-Genre Melodic Similarity & Calibrated Abstention | **Completed & Verified** | `reports/cross_genre_evaluation.md` |
-| **Exp 6** | Phase 2.1 Scientific Evaluation Framework & Multi-Seed Benchmarks | **Historical; canonical rerun pending** | `reports/scientific_evaluation_report.md` |
+| **Exp 6** | Phase 2.1 Scientific Evaluation Framework & Multi-Seed Benchmarks | **Current canonical run; artist isolation unverifiable** | `reports/scientific_evaluation_report.md` |
 | *Historical* | *Synthetic Random-Embedding Hybrid Fallback* | **INVALIDATED / SUPERSEDED** | Historical commit `7525287` |
 | **Exp 7** | Sequential Transition & Melodic Motif (*Pakad*) Modeling | **Planned** | Roadmap Phase 2.2 |
 | **Exp 8** | Multi-Dataset Scaled Benchmark (50 Ragamala Corpus) | **Planned** | Roadmap Phase 2.3 |

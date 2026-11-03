@@ -114,7 +114,17 @@ The initial research cohort covers 10 representative Hindustani ragas across div
 
 ## 8. Empirical Benchmark Results
 
-**Canonical benchmark pending.** The report currently in the repository was generated from a dirty working tree and incorrectly treated video/source IDs as performer identities. Its metrics are historical only and are not presented here as results for the reviewed implementation. The canonical report and README table will be updated only by the clean-tree evaluation workflow after its complete run succeeds.
+Canonical scientific evaluation completed on clean commit `b894d85b7bf4dfc0d4e31bb1bfa3ce1a0369185d` (evaluation `0e7c1a57ddd34642a484913cca5737fc`). Dataset audio-inclusive fingerprint: `252c55be0ff9dc4375bd38d796ffe5fa33ea43a28cd0daac2b1a6e4eaf88c823` (`audio_sha256_v1`); split fingerprint: `b5ba9f621f933b29b76fe0909fa99fa37ced8cc10626d8c2f0a169c91f54f171`. The corpus has 390 clips (360 train / 30 held-out), 82 performance/source groups and 10 test performance clusters. Recording and performance isolation are verified; performer isolation is **not verifiable** because artist metadata is absent. These are not artist-independent results.
+
+| Model | Macro-F1 (mean +/- seed SD) | Accuracy (mean +/- seed SD) | Evaluation configuration |
+| :--- | :---: | :---: | :--- |
+| Handcrafted SVM | 0.4086 +/- 0.0000 | 0.4333 +/- 0.0000 | 35 handcrafted features; RBF SVC, C=10 |
+| Random Forest | 0.3540 +/- 0.0168 | 0.3556 +/- 0.0157 | 100 trees; max depth 12 |
+| Logistic Regression | 0.5400 +/- 0.0000 | 0.5333 +/- 0.0000 | max_iter=1000 |
+| Frozen MERT | 0.2671 +/- 0.0328 | 0.3667 +/- 0.0272 | MERT revision `12af15fef9d0ac838c3f475bfbbf26d2060dd4f5`; 1536-d embeddings; 25 epochs |
+| Hybrid pitch + MERT | 0.4902 +/- 0.0469 | 0.4889 +/- 0.0567 | 35 handcrafted + 1536 MERT dimensions; 25 epochs |
+
+Seed runs: `[42, 123, 999]`; CPU; model configurations are recorded in the report. Lockfile SHA-256: `cf8239ba12fe3e9a23886a7b102824d8c19bb7a667ec11deccaf060d57c7e00d`. See [the full report](reports/scientific_evaluation_report.md) and the 15 experiment records for per-run provenance and metrics. Historical registry entries are not directly comparable unless their dataset, split, code, and model configurations match.
 ---
 
 ## 9. Cross-Genre Melodic Similarity & Calibrated Abstention
