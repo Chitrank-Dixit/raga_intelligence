@@ -46,6 +46,7 @@ def extract_features_from_manifest(
 
     expected_meta = {
         "dataset_fingerprint": manifest.compute_dataset_fingerprint(),
+        "fingerprint_policy": "audio_sha256_v1",
         "feature_schema_version": FeatureSchema.SCHEMA_VERSION,
         "extractor_version": "1.0.0",
         "include_melodic_features": bool(include_melodic_features),
@@ -168,6 +169,7 @@ def extract_mert_embeddings_from_manifest(
 
     expected_meta = {
         "dataset_fingerprint": manifest.compute_dataset_fingerprint(),
+        "fingerprint_policy": "audio_sha256_v1",
         "feature_schema_version": FeatureSchema.SCHEMA_VERSION,
         "model_name": str(effective_model_name),
         "model_revision": str(effective_model_revision),
@@ -296,12 +298,14 @@ def extract_mert_embeddings_from_manifest(
 
 def _assert_no_split_leakage(manifest: DatasetManifest) -> None:
     val = manifest.validate_splits()
-    if not val["valid_no_recording_leakage"]:
+    if val["recording_isolation_status"] == "failed":
         raise ValueError(f"Fatal dataset leakage: recordings found in multiple splits: {val['leaked_recordings']}")
-    if not val["valid_no_performance_leakage"]:
+    if val["performance_isolation_status"] == "failed":
         raise ValueError(f"Fatal dataset leakage: performances found in multiple splits: {val['leaked_performances']}")
-    if not val["valid_no_performer_leakage"]:
+    if val["performer_isolation_status"] == "failed":
         raise ValueError(f"Fatal dataset leakage: performers found in multiple splits: {val['leaked_performers']}")
+    if val["performer_isolation_status"] == "not_verifiable":
+        logger.warning("Performer-level leakage is not verifiable because artist metadata is incomplete")
 
 
 def train_baseline_pipeline(

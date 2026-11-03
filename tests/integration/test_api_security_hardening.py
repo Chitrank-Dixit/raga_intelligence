@@ -256,3 +256,78 @@ async def test_cleanup_on_request_cancellation():
     # Limiter count must have been returned to initial state
     assert inference_limiter.active_count == initial_active
 
+
+@pytest.mark.asyncio
+async def test_inference_phase_cancellation_waits_for_worker_and_releases_resources(
+    tmp_path: Path, monkeypatch
+):
+    import asyncio
+    import threading
+    from types import SimpleNamespace
+    from fastapi import UploadFile
+    import raga_intelligence.api.routes as routes
+
+    monkeypatch.setattr(routes.tempfile, "tempdir", str(tmp_path))
+    started = threading.Event()
+    finish = threading.Event()
+
+    class BlockingPipeline:
+        def analyze_audio(self, **kwargs):
+            assert Path(kwargs["audio_source"]).exists()
+            started.set()
+            finish.wait(timeout=5)
+            return SimpleNamespace(ranked_matches=[])
+
+    monkeypatch.setattr(routes, "get_pipeline", lambda: BlockingPipeline())
+    before = set(tmp_path.glob("tmp*.wav"))
+    active_before = inference_limiter.active_count
+    upload = UploadFile(filename="cancel_inference.wav", file=io.BytesIO(make_test_wav()))
+    request_task = asyncio.create_task(
+        routes.analyze_audio_endpoint(audio_file=upload, tonic_hz=220.0, top_k=3)
+    )
+
+    await asyncio.wait_for(asyncio.to_thread(started.wait), timeout=3)
+    assert inference_limiter.active_count == active_before + 1
+    active_temp_files = set(tmp_path.glob("tmp*.wav")) - before
+    assert len(active_temp_files) == 1
+
+    request_task.cancel()
+    await asyncio.sleep(0.05)
+    assert not request_task.done()
+    assert inference_limiter.active_count == active_before + 1
+    assert active_temp_files.pop().exists()
+
+    finish.set()
+    with pytest.raises(asyncio.CancelledError):
+        await request_task
+
+    assert inference_limiter.active_count == active_before
+    assert not list(tmp_path.glob("tmp*.wav"))
+    assert inference_limiter.try_acquire() is True
+    inference_limiter.release()
+
+
+@pytest.mark.asyncio
+async def test_inference_exception_cleans_temp_file_and_releases_capacity(tmp_path: Path, monkeypatch):
+    from fastapi import HTTPException, UploadFile
+    import raga_intelligence.api.routes as routes
+
+    monkeypatch.setattr(routes.tempfile, "tempdir", str(tmp_path))
+
+    class FailingPipeline:
+        def analyze_audio(self, **kwargs):
+            assert Path(kwargs["audio_source"]).exists()
+            raise RuntimeError("inference failed")
+
+    monkeypatch.setattr(routes, "get_pipeline", lambda: FailingPipeline())
+    upload = UploadFile(filename="failure.wav", file=io.BytesIO(make_test_wav()))
+    before_active = inference_limiter.active_count
+    with pytest.raises(HTTPException) as error:
+        await routes.analyze_audio_endpoint(audio_file=upload, tonic_hz=220.0, top_k=3)
+
+    assert error.value.status_code == 500
+    assert inference_limiter.active_count == before_active
+    assert not list(tmp_path.glob("tmp*.wav"))
+    assert inference_limiter.try_acquire() is True
+    inference_limiter.release()
+

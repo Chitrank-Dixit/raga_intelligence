@@ -1,4 +1,6 @@
 # Scientific Evaluation Report: Indian Classical Raga Recognition
+
+> **Canonical benchmark pending.** This historical report was generated from a dirty working tree. Its prior performer-isolation claim used video/source IDs as artist identities and is invalid. The metrics below are retained for audit only; they are not current results. Replace this report only after a complete evaluation from a clean commit.
 **Phase**: Phase 2.1 — Scientific Evaluation Framework
 **Execution Device**: `cpu`
 **Seeds Evaluated**: `[42, 123, 999]`
@@ -11,7 +13,7 @@
 **MERT Model Revision**: `12af15fef9d0ac838c3f475bfbbf26d2060dd4f5`
 
 ## 1. Executive Summary & Core Findings
-This report provides an empirical, statistically grounded benchmark of Indian classical raga recognition across 10 canonical ragas using the Hindustani audio corpus (390 clips total, 360 train, 30 held-out test). All models are evaluated on the exact same held-out test partition with zero recording, performance, or performer leakage. Statistical uncertainty is computed using non-parametric cluster bootstrap resampling (1000 draws) at the performance/performer level to preserve intra-recording correlation.
+This historical report evaluated 10 canonical ragas using the Hindustani audio corpus (390 clips total, 360 train, 30 held-out test). Recording and performance/source groups were partitioned across splits. Performer isolation was not verifiable because the dataset contains no artist metadata. Statistical uncertainty used non-parametric cluster bootstrap resampling (1000 draws) at the performance/source level.
 
 ### Key Takeaways
 1. **Baseline Superiority of Tonic-Relative Handcrafted Features**: The handcrafted SVM baseline achieves **Macro-F1 of 0.4086 ± 0.0000** and Accuracy of **0.4333 ± 0.0000**, substantially exceeding random chance (0.1000).
@@ -32,7 +34,7 @@ Comparison across Handcrafted Baselines (SVM, Random Forest, Logistic Regression
 | **Hybrid (Pitch + MERT)** | `0.4902 ± 0.0469` | `0.4889 ± 0.0567` | `0.4902` | `1.4688` | `0.6796` | `0.2597` |
 
 ### Primary Seed (42) Statistical Generalization Uncertainty (95% Cluster Bootstrap)
-Resampling performed over 10 unique performance groups (30 test clips). Quantifies generalization bounds to unseen performances/performers.
+Resampling performed over 10 unique performance groups (30 test clips). It does not establish generalization to unseen performers.
 
 > [!WARNING]
 > **Small-Sample Cluster Limitation**: The test partition contains 10 independent clusters (<15). Asymptotic cluster bootstrap coverage may exhibit downward bias; interpret confidence intervals with caution.
@@ -133,9 +135,9 @@ Evaluates the individual and grouped discriminative power of musical features on
 - **Distinct Performances**: `82`
 - **Full Partitionability across all Ragas**: `Yes`
 - **Data Leakage Verification**:
-  - Recording Leakage: `0.0%` (Zero clips overlap across train/test)
-  - Performance Leakage: `0.0%` (Zero YouTube/audio sources overlap across train/test)
-  - Performer Leakage: `0.0%` (Zero performers overlap across train/test)
+  - Recording Isolation: `verified` in this historical run
+  - Performance Isolation: `verified` in this historical run
+  - Performer Isolation: `not_verifiable` (artist metadata unavailable)
 
 ### Grouping Limitations & Observations
 - **Bageshree**: 9 distinct performances

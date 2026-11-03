@@ -19,7 +19,7 @@ This project develops an evidence-driven machine learning proof of concept (PoC)
 ## 2. Core Principles & Design
 
 - **Evidence-Driven Baseline First**: Establishes empirical baselines using tonic-normalized pitch-class distributions before transfer learning.
-- **Strict Leakage Prevention**: Split generation strictly partitions audio at the **recording / performance and artist** level. Audio segments from the same performance never cross train and test boundaries.
+- **Split Integrity**: Splits are audited at recording and performance/source level. Artist isolation is reported as unverifiable unless genuine performer metadata is available.
 - **Honest Predictions**: Explicit separation between *closed-world classical classification* and *open-world cross-genre melodic similarity*.
 - **Container-First Workflow**: Local development and production containers configured via Podman and Compose.
 - **Resource & Hardware Awareness**: Automatic detection and verified tensor execution for NVIDIA GPU passthrough, paired with a reliable CPU fallback.
@@ -114,17 +114,7 @@ The initial research cohort covers 10 representative Hindustani ragas across div
 
 ## 8. Empirical Benchmark Results
 
-The latest scientific report is [scientific_evaluation_report.md](reports/scientific_evaluation_report.md). It uses seeds `42, 123, 999`, 390 clips (360 train / 30 test), and MERT revision `12af15fef9d0ac838c3f475bfbbf26d2060dd4f5`. Dataset fingerprint: `f50e4843589290dfe26ad2d4a40574d4664c948aba465a3167a2f156bbc33308` (includes each audio SHA-256). Code commit: `1d50952a75c3fb4665ae63acc2587e8071552106`; working-tree fingerprint: `20b4f51e28c142163b0e2b3d83c27a64786823db2f8071b2bb66eb88e9d5a867`. The working tree was dirty because this evaluation ran before commit. Evaluation split fingerprint: `b5ba9f621f933b29b76fe0909fa99fa37ced8cc10626d8c2f0a169c91f54f171`.
-
-Latest multi-seed report metrics:
-
-| Architecture | Model configuration | Macro-F1 (mean ± seed std) | Accuracy (mean ± seed std) | Evaluation split | Experiment records |
-| :--- | :--- | :---: | :---: | :--- | :--- |
-| Handcrafted SVM | 35 handcrafted features; RBF, C=10 | 0.4086 ± 0.0000 | 0.4333 ± 0.0000 | 30 held-out clips; 10 performance groups | `baseline_svm_20261103_155800_*.json` |
-| Frozen MERT | MERT-v1-95M, 1536 dims; 25 epochs | 0.2671 ± 0.0328 | 0.3667 ± 0.0272 | 30 held-out clips; 10 performance groups | `frozen_mert_head_20261103_155812_*.json` |
-| Hybrid late fusion | 35 handcrafted + 1536 MERT; 25 epochs | 0.4902 ± 0.0469 | 0.4889 ± 0.0567 | 30 held-out clips; 10 performance groups | `hybrid_late_fusion_20261103_155818_*.json` |
-
-These values replace the older one-off checkpoint metrics; those runs used different configurations and lack matching provenance, so they are not directly comparable.
+**Canonical benchmark pending.** The report currently in the repository was generated from a dirty working tree and incorrectly treated video/source IDs as performer identities. Its metrics are historical only and are not presented here as results for the reviewed implementation. The canonical report and README table will be updated only by the clean-tree evaluation workflow after its complete run succeeds.
 ---
 
 ## 9. Cross-Genre Melodic Similarity & Calibrated Abstention

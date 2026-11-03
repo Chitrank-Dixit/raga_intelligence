@@ -7,6 +7,7 @@ import pytest
 
 from raga_intelligence.config import RAGA_LIST
 from raga_intelligence.datasets.adapters import SyntheticDatasetAdapter
+from raga_intelligence.datasets.hindustani_dataset import HindustaniDatasetAdapter
 from raga_intelligence.datasets.manifest import DatasetItem, DatasetManifest
 
 
@@ -78,6 +79,31 @@ def test_synthetic_dataset_adapter(tmp_path: Path):
     assert validation["valid_no_recording_leakage"] is True
 
 
+def test_hindustani_video_id_is_not_performer_identity(tmp_path: Path):
+    audio_name = "train_[video123]_chunk0.wav"
+    (tmp_path / audio_name).write_bytes(b"audio")
+    (tmp_path / "metadata.csv").write_text(
+        f"file_name,label,tonic_hz\n{audio_name},Bhairav,220\n", encoding="utf-8"
+    )
+    manifest = HindustaniDatasetAdapter(dataset_dir=tmp_path).build_manifest()
+    item = manifest.items[0]
+    assert item.performance_id == "video123"
+    assert item.performer is None
+    assert manifest.validate_splits()["performer_isolation_status"] == "not_verifiable"
+
+
+def test_hindustani_artist_metadata_is_kept_separate_from_video_id(tmp_path: Path):
+    audio_name = "train_[video123]_chunk0.wav"
+    (tmp_path / audio_name).write_bytes(b"audio")
+    (tmp_path / "metadata.csv").write_text(
+        f"file_name,label,tonic_hz,artist\n{audio_name},Bhairav,220,Artist Name\n",
+        encoding="utf-8",
+    )
+    item = HindustaniDatasetAdapter(dataset_dir=tmp_path).build_manifest().items[0]
+    assert item.performer == "Artist Name"
+    assert item.performance_id == "video123"
+
+
 def test_manifest_performer_and_performance_leakage_detection():
     manifest = DatasetManifest()
     manifest.add_item(
@@ -112,6 +138,8 @@ def test_manifest_performer_and_performance_leakage_detection():
     assert val["valid_no_performance_leakage"] is True
     assert val["valid_no_performer_leakage"] is True
     assert val["performer_metadata_complete"] is True
+    assert val["performer_isolation_status"] == "verified"
+    assert val["performance_isolation_status"] == "verified"
 
     # Deliberate performer leakage: Ustad A in test split with new performance
     manifest.add_item(
@@ -129,6 +157,7 @@ def test_manifest_performer_and_performance_leakage_detection():
     )
     val2 = manifest.validate_splits()
     assert val2["valid_no_performer_leakage"] is False
+    assert val2["performer_isolation_status"] == "failed"
     assert "Ustad A" in val2["leaked_performers"]
 
     # Deliberate performance leakage: perf_01 in test split with new performer
@@ -161,6 +190,7 @@ def test_manifest_performer_and_performance_leakage_detection():
     )
     val3 = manifest2.validate_splits()
     assert val3["valid_no_performance_leakage"] is False
+    assert val3["performance_isolation_status"] == "failed"
     assert "concert_alpha" in val3["leaked_performances"]
 
 

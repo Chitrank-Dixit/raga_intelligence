@@ -152,15 +152,15 @@ def main():
 
     # Validate split integrity
     validation = manifest.validate_splits()
-    if not validation["valid_no_recording_leakage"]:
+    if validation["recording_isolation_status"] == "failed":
         raise ValueError(
             f"Fatal dataset leakage: recordings found in multiple splits: {validation['leaked_recordings']}"
         )
-    if not validation["valid_no_performance_leakage"]:
+    if validation["performance_isolation_status"] == "failed":
         raise ValueError(
             f"Fatal dataset leakage: performances found in multiple splits: {validation['leaked_performances']}"
         )
-    if not validation["valid_no_performer_leakage"]:
+    if validation["performer_isolation_status"] == "failed":
         raise ValueError(
             f"Fatal dataset leakage: performers found in multiple splits: {validation['leaked_performers']}"
         )
@@ -169,11 +169,12 @@ def main():
     logger.info(
         f"Manifest split validation PASSED: "
         f"Recordings: {summary['recordings_count']['train']} train / {summary['recordings_count']['val']} val / {summary['recordings_count']['test']} test. "
-        f"Performers: {summary['performers_count']['train']} train / {summary['performers_count']['val']} val / {summary['performers_count']['test']} test."
+        f"Performer isolation: {validation['performer_isolation_status']}. "
+        f"Known performers: {summary['performers_count']['train']} train / {summary['performers_count']['val']} val / {summary['performers_count']['test']} test."
     )
     if not validation.get("performer_metadata_complete", True):
         logger.warning(
-            f"Performer metadata is incomplete ({validation.get('unknown_performer_count', 0)} items have Unknown performer). "
+            f"Performer metadata is incomplete ({validation.get('unknown_performer_count', 0)} items have no artist identity). "
             "Performer-level leakage cannot be fully guaranteed for those unannotated items."
         )
 

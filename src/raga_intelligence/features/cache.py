@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -57,42 +58,46 @@ def compute_file_sha256(path: Path | str, chunk_size: int = 65536) -> str:
 
 def compute_manifest_content_fingerprint(
     items: List[DatasetItem],
-    include_file_stats: bool = True,
-    include_audio_content: bool = True,
 ) -> str:
     """
     Computes a deterministic cryptographic fingerprint of a dataset manifest.
 
-    Incorporates:
-      - Recording ID, split, canonical raga, tonic.
-      - Per-recording audio SHA-256 (if present) or file stats (size, mtime) or raw content hash.
-    Any alteration of audio content or split assignment will invalidate this fingerprint.
+    Requires a valid audio SHA-256 for every item and excludes machine-specific paths.
     """
-    sorted_items = sorted(items, key=lambda x: (x.recording_id, x.split, x.file_path))
+    sorted_items = sorted(items, key=lambda x: (x.recording_id, x.split, x.source, x.performance_id or ""))
     descriptors: List[str] = []
 
     for it in sorted_items:
-        file_stat_desc = "missing"
-        p = Path(it.file_path)
-        if p.exists():
-            if include_audio_content and getattr(it, "audio_sha256", None):
-                file_stat_desc = f"sha:{it.audio_sha256}"
-            elif include_audio_content:
-                try:
-                    file_stat_desc = f"sha:{compute_file_sha256(p)}"
-                except Exception:
-                    file_stat_desc = "unreadable"
-            elif include_file_stats:
-                try:
-                    st = p.stat()
-                    file_stat_desc = f"sz:{st.st_size}:mt:{int(st.st_mtime)}"
-                except Exception:
-                    file_stat_desc = "unreadable"
-
-        desc = f"{it.recording_id}:{it.split}:{it.raga}:{it.tonic_hz}:{it.file_path}:{file_stat_desc}"
+        if not it.audio_sha256 or not re.fullmatch(r"[0-9a-f]{64}", it.audio_sha256):
+            raise ValueError(f"Missing or invalid audio SHA-256 for recording {it.recording_id}")
+        if not Path(it.file_path).is_file():
+            raise FileNotFoundError(f"Audio file missing for recording {it.recording_id}: {it.file_path}")
+        actual_sha = compute_file_sha256(it.file_path)
+        if not re.fullmatch(r"[0-9a-f]{64}", actual_sha):
+            raise ValueError(f"Could not compute a valid audio SHA-256 for recording {it.recording_id}")
+        it.audio_sha256 = actual_sha
+        desc = json.dumps(
+            {
+                "recording_id": it.recording_id,
+                "source": it.source,
+                "split": it.split,
+                "raga": it.raga,
+                "tonic_hz": it.tonic_hz,
+                "performer": it.performer,
+                "performance_id": it.performance_id,
+                "duration_sec": it.duration_sec,
+                "sample_rate": it.sample_rate,
+                "tradition": it.tradition,
+                "license": it.license,
+                "metadata": it.metadata,
+                "audio_sha256": actual_sha,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         descriptors.append(desc)
 
-    combined = "|".join(descriptors)
+    combined = "audio_sha256_v1|" + "|".join(sorted(descriptors))
     return hashlib.sha256(combined.encode("utf-8")).hexdigest()
 
 
@@ -130,7 +135,7 @@ def validate_cache_manifest_provenance(
     - Handcrafted and MERT caches differ in recording IDs, labels, or split assignments
     """
     errors: List[str] = []
-    expected_fp = manifest.compute_dataset_fingerprint()
+    expected_fp = manifest.compute_dataset_fingerprint(force_recompute=True)
 
     # 1. Inspect handcrafted cache metadata
     feat_meta = _extract_meta_dict(feat_cache_data)
@@ -140,7 +145,10 @@ def validate_cache_manifest_provenance(
         feat_schema = None
     else:
         feat_fp = feat_meta.get("dataset_fingerprint")
+        feat_policy = feat_meta.get("fingerprint_policy")
         feat_schema = feat_meta.get("feature_schema_version")
+        if feat_policy != "audio_sha256_v1":
+            errors.append("Handcrafted feature cache uses a missing or unsupported fingerprint policy")
         if feat_fp != expected_fp:
             errors.append(
                 f"Handcrafted feature cache dataset fingerprint mismatch "
@@ -230,6 +238,9 @@ def validate_cache_manifest_provenance(
             errors.append("MERT cache is missing 'metadata' section; provenance cannot be verified")
         else:
             mert_fp = mert_meta.get("dataset_fingerprint")
+            mert_policy = mert_meta.get("fingerprint_policy")
+            if mert_policy != "audio_sha256_v1":
+                errors.append("MERT cache uses a missing or unsupported fingerprint policy")
             if mert_fp != expected_fp:
                 errors.append(
                     f"MERT cache dataset fingerprint mismatch (cached: {mert_fp} != manifest: {expected_fp})"

@@ -339,11 +339,11 @@ class GroupAwarePartitioner:
         new_manifest = DatasetManifest(items=new_items)
         leakage_check = new_manifest.validate_splits()
 
-        if not leakage_check["valid_no_recording_leakage"]:
+        if leakage_check["recording_isolation_status"] == "failed":
             raise ValueError(f"Recording leakage detected: {leakage_check['leaked_recordings']}")
-        if group_col == "performance_id" and not leakage_check["valid_no_performance_leakage"]:
+        if group_col == "performance_id" and leakage_check["performance_isolation_status"] == "failed":
             raise ValueError(f"Performance leakage detected: {leakage_check['leaked_performances']}")
-        if group_col == "performer" and not leakage_check["valid_no_performer_leakage"]:
+        if group_col == "performer" and leakage_check["performer_isolation_status"] == "failed":
             raise ValueError(f"Performer leakage detected: {leakage_check['leaked_performers']}")
 
         # 6. Audit class coverage across splits

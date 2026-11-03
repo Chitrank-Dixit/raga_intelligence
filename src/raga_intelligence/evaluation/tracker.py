@@ -44,7 +44,7 @@ def get_git_commit_hash() -> str:
 
 
 def get_working_tree_fingerprint() -> tuple[bool, str]:
-    """Fingerprint the uncommitted source tree alongside its base commit SHA."""
+    """Fingerprint source/config changes; generated reports and caches are excluded."""
     status = subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=all"],
         stdout=subprocess.PIPE,
@@ -54,17 +54,87 @@ def get_working_tree_fingerprint() -> tuple[bool, str]:
         check=True,
     ).stdout
     digest = hashlib.sha256()
+    relevant_lines = []
+    relevant_roots = ("scripts/", "src/", "tests/", "configs/", "docs/")
+    relevant_files = {
+        "README.md", ".gitignore", "pyproject.toml", "uv.lock", "Containerfile", "compose.yaml"
+    }
     for line in sorted(status.splitlines()):
         path = line[3:]
-        if not path.startswith(("scripts/", "src/", "tests/")) and path not in {
-            "pyproject.toml", "uv.lock", "Containerfile", "compose.yaml"
-        }:
+        if not path.startswith(relevant_roots) and path not in relevant_files:
             continue
+        relevant_lines.append(line)
         digest.update(line.encode("utf-8", errors="replace"))
         candidate = Path(path)
         if candidate.is_file():
             digest.update(candidate.read_bytes())
-    return bool(status.strip()), digest.hexdigest()
+    return bool(relevant_lines), digest.hexdigest()
+
+
+def assert_clean_source_tree(allow_dirty_development: bool = False) -> tuple[str, bool]:
+    """Require a clean source/config tree; return (commit SHA, is_canonical)."""
+    dirty, _ = get_working_tree_fingerprint()
+    if dirty:
+        if not allow_dirty_development:
+            raise RuntimeError(
+                "Canonical scientific evaluation requires a clean source working tree. "
+                "Commit or stash source/config changes first."
+            )
+        return get_git_commit_hash(), False
+    return get_git_commit_hash(), True
+
+
+def validate_evaluation_records(
+    records: List["ExperimentRecord"],
+    evaluation_id: str,
+    expected_pairs: set[tuple[str, int]],
+    require_clean: bool = True,
+) -> List["ExperimentRecord"]:
+    """Reject missing, mixed, or non-canonical runs before report publication."""
+    current = [record for record in records if record.evaluation_id == evaluation_id]
+    if len(current) != len(expected_pairs) or {
+        (record.model_name, record.seed) for record in current
+    } != expected_pairs:
+        raise ValueError("Evaluation records are incomplete or contain unexpected model/seed runs")
+    for field_name in (
+        "code_version", "dataset_fingerprint", "evaluation_split_fingerprint",
+        "lockfile_hash", "mert_model_revision", "fingerprint_policy",
+    ):
+        values = {getattr(record, field_name) for record in current}
+        if len(values) != 1 or not next(iter(values)):
+            raise ValueError(f"Evaluation records have inconsistent {field_name}")
+    if require_clean and any(record.working_tree_dirty for record in current):
+        raise ValueError("Canonical report cannot include dirty-working-tree experiments")
+    if len({record.working_tree_fingerprint for record in current}) != 1:
+        raise ValueError("Evaluation records have inconsistent working-tree fingerprints")
+    if len({record.working_tree_dirty for record in current}) != 1:
+        raise ValueError("Evaluation records have inconsistent working-tree cleanliness")
+    env_fields = (
+        "os", "python_version", "torch_version", "transformers_version", "librosa_version",
+        "sklearn_version", "device_name",
+    )
+    env_fingerprints = {
+        json.dumps({key: record.system_environment.get(key) for key in env_fields}, sort_keys=True)
+        for record in current
+    }
+    if len(env_fingerprints) != 1:
+        raise ValueError("Evaluation records have inconsistent execution environments")
+    for model_name in {record.model_name for record in current}:
+        model_records = [record for record in current if record.model_name == model_name]
+        config_fingerprints = {
+            json.dumps(
+                {
+                    "architecture": record.model_architecture,
+                    "hyperparameters": record.hyperparameters,
+                    "feature_config": record.feature_config,
+                },
+                sort_keys=True,
+            )
+            for record in model_records
+        }
+        if len(config_fingerprints) != 1:
+            raise ValueError(f"Evaluation records have inconsistent model configuration for {model_name}")
+    return current
 
 
 def get_lockfile_hash() -> str:
@@ -139,6 +209,8 @@ class ExperimentRecord:
     notes: Optional[str] = None
     working_tree_dirty: bool = False
     working_tree_fingerprint: str = ""
+    evaluation_id: str = ""
+    fingerprint_policy: str = "audio_sha256_v1"
 
 
 class ExperimentTracker:
@@ -165,6 +237,8 @@ class ExperimentTracker:
         dataset_version: str = "1.0.0",
         recording_ids_per_split: Optional[Dict[str, List[str]]] = None,
         evaluation_split_fingerprint: Optional[str] = None,
+        evaluation_id: Optional[str] = None,
+        fingerprint_policy: str = "audio_sha256_v1",
         cache_fingerprints: Optional[Dict[str, Any]] = None,
         feature_schema_version: Optional[str] = None,
         mert_model_revision: Optional[str] = None,
@@ -204,6 +278,8 @@ class ExperimentTracker:
             dataset_version=dataset_version,
             recording_ids_per_split=recording_ids_per_split or {},
             evaluation_split_fingerprint=evaluation_split_fingerprint or "",
+            evaluation_id=evaluation_id or "",
+            fingerprint_policy=fingerprint_policy,
             cache_fingerprints=cache_fingerprints or {},
             feature_schema_version=feature_schema_version or FeatureSchema.SCHEMA_VERSION,
             mert_model_revision=mert_model_revision or settings.model.mert_model_revision,

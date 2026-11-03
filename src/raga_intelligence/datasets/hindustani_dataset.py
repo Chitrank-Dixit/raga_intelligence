@@ -74,10 +74,17 @@ class HindustaniDatasetAdapter(BaseDatasetAdapter):
             raw_label = str(row["label"])
             canonical_raga = CANONICAL_NAME_MAP[raw_label]
             tonic_hz = float(row["tonic_hz"]) if pd.notna(row["tonic_hz"]) else None
+            performer = None
+            for column in ("performer", "artist"):
+                if column in row and pd.notna(row[column]) and str(row[column]).strip():
+                    candidate = str(row[column]).strip()
+                    if candidate.lower() not in {"unknown", "none", "null"}:
+                        performer = candidate
+                        break
 
             # Extract video/performance id from filename e.g. "train_[IKNN8CIF_as]_chunk0.mp3"
             m = re.search(r"\[([a-zA-Z0-9_-]+)\]", rel_path)
-            perf_id = m.group(1) if m else full_audio_path.stem
+            perf_id = m.group(1) if m else None
 
             split = "test" if "test_" in rel_path.lower() else "train"
 
@@ -101,7 +108,7 @@ class HindustaniDatasetAdapter(BaseDatasetAdapter):
                 file_path=str(full_audio_path),
                 raga=canonical_raga,
                 tradition="Hindustani",
-                performer=perf_id,  # Video / performance grouping
+                performer=performer,
                 performance_id=perf_id,
                 duration_sec=30.0,  # Nominal segment duration
                 sample_rate=24000,
@@ -116,7 +123,9 @@ class HindustaniDatasetAdapter(BaseDatasetAdapter):
         validation = manifest.validate_splits()
         logger.info(
             f"Built manifest with {len(manifest.items)} clips. "
-            f"No recording leakage: {validation['valid_no_recording_leakage']} "
+            f"Recording isolation: {validation['recording_isolation_status']}; "
+            f"performance isolation: {validation['performance_isolation_status']}; "
+            f"performer isolation: {validation['performer_isolation_status']} "
             f"(Train: {validation['train_recordings_count']}, Test: {validation['test_recordings_count']})"
         )
         return manifest

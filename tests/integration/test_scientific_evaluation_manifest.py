@@ -7,7 +7,11 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from run_scientific_evaluation import build_evaluation_manifest
+from run_scientific_evaluation import (
+    build_evaluation_manifest,
+    evaluation_mode_banner,
+    format_leakage_audit,
+)
 from raga_intelligence.features.cache import compute_manifest_content_fingerprint
 
 
@@ -51,3 +55,18 @@ def test_evaluation_manifest_fails_when_audio_cannot_be_read(tmp_path, monkeypat
     monkeypatch.setattr("builtins.open", deny_audio)
     with pytest.raises(OSError, match="Could not hash audio content"):
         build_evaluation_manifest(tmp_path)
+
+
+def test_report_audit_does_not_claim_unverified_performer_isolation():
+    lines = format_leakage_audit({
+        "recording_isolation_status": "verified",
+        "performance_isolation_status": "verified",
+        "performer_isolation_status": "not_verifiable",
+    })
+    assert "Performer Isolation: `not_verifiable`" in lines[2]
+    assert all("0.0%" not in line and "zero" not in line.lower() for line in lines)
+
+
+def test_dirty_development_report_is_marked_non_canonical():
+    assert "NON-CANONICAL DEVELOPMENT RUN" in evaluation_mode_banner(False)
+    assert evaluation_mode_banner(True) == ""

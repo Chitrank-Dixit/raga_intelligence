@@ -5,6 +5,7 @@ FastAPI route definitions for health, models info, and audio analysis.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
 import re
@@ -288,11 +289,32 @@ async def analyze_audio_endpoint(
         # Execute inference using temp_path
         pipe = get_pipeline()
         try:
-            result = pipe.analyze_audio(
-                audio_source=temp_path,
-                ground_truth_tonic_hz=tonic_hz,
-                top_k=top_k,
+            inference_future = asyncio.get_running_loop().run_in_executor(
+                None,
+                functools.partial(
+                    pipe.analyze_audio,
+                    audio_source=temp_path,
+                    ground_truth_tonic_hz=tonic_hz,
+                    top_k=top_k,
+                ),
             )
+            try:
+                result = await asyncio.shield(inference_future)
+            except asyncio.CancelledError:
+                # Keep the slot and temporary file until the worker has actually stopped.
+                while not inference_future.done():
+                    try:
+                        await asyncio.shield(inference_future)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break
+                if inference_future.done():
+                    try:
+                        inference_future.result()
+                    except Exception:
+                        pass
+                raise
         except AudioFileError as afe:
             clean_err = sanitize_error_detail(str(afe), temp_path)
             raise HTTPException(

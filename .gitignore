@@ -1,5 +1,6 @@
 # Python / virtual environment
 __pycache__/
+.pytest_cache/
 *.py[cod]
 *$py.class
 .venv/
@@ -56,4 +57,9 @@ Thumbs.db
 
 # Podman / Docker
 .container_tmp/
+
+# Non-canonical development evaluation outputs
+artifacts/experiments/development/
+reports/development_*
+all_fix_prompts.txt
 

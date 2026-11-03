@@ -5,11 +5,47 @@ Dataset manifest schema, validation, and split integrity verification.
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
 import pandas as pd
 from pydantic import BaseModel, Field
+
+
+def _known_identity(value: Optional[str]) -> bool:
+    return value is not None and value.strip().lower() not in {"", "unknown", "none", "null"}
+
+
+def _isolation_status(leakage_found: bool, metadata_complete: bool) -> str:
+    if leakage_found:
+        return "failed"
+    return "verified" if metadata_complete else "not_verifiable"
+
+
+def _canonical_item_key(item: "DatasetItem") -> str:
+    return json.dumps(
+        {
+            "recording_id": item.recording_id,
+            "split": item.split,
+            "source": item.source,
+            "performance_id": item.performance_id,
+            "raga": item.raga,
+            "tonic_hz": item.tonic_hz,
+            "performer": item.performer,
+            "duration_sec": item.duration_sec,
+            "sample_rate": item.sample_rate,
+            "tradition": item.tradition,
+            "license": item.license,
+            "metadata": item.metadata,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _performance_key(item: "DatasetItem") -> str:
+    return item.performance_id if _known_identity(item.performance_id) else item.recording_id
 
 
 class DatasetItem(BaseModel):
@@ -19,7 +55,7 @@ class DatasetItem(BaseModel):
     file_path: str
     raga: str
     tradition: str = "Hindustani"
-    performer: str = "Unknown"
+    performer: Optional[str] = None
     performance_id: Optional[str] = None
     duration_sec: float = Field(ge=0.0)
     sample_rate: int = Field(gt=0)
@@ -53,20 +89,20 @@ class DatasetManifest(BaseModel):
         rec_leakage = (train_ids & val_ids) | (train_ids & test_ids) | (val_ids & test_ids)
 
         # 2. Performance-level checks
-        train_perfs = {it.performance_id or it.recording_id for it in train_items}
-        val_perfs = {it.performance_id or it.recording_id for it in val_items}
-        test_perfs = {it.performance_id or it.recording_id for it in test_items}
+        train_perfs = {_performance_key(it) for it in train_items}
+        val_perfs = {_performance_key(it) for it in val_items}
+        test_perfs = {_performance_key(it) for it in test_items}
         perf_leakage = (train_perfs & val_perfs) | (train_perfs & test_perfs) | (val_perfs & test_perfs)
 
         # 3. Performer-level checks
-        train_performers = {it.performer for it in train_items if it.performer not in ("Unknown", "unknown", None, "")}
-        val_performers = {it.performer for it in val_items if it.performer not in ("Unknown", "unknown", None, "")}
-        test_performers = {it.performer for it in test_items if it.performer not in ("Unknown", "unknown", None, "")}
+        train_performers = {it.performer for it in train_items if _known_identity(it.performer)}
+        val_performers = {it.performer for it in val_items if _known_identity(it.performer)}
+        test_performers = {it.performer for it in test_items if _known_identity(it.performer)}
         performer_leakage = (train_performers & val_performers) | (train_performers & test_performers) | (val_performers & test_performers)
 
         # 4. Metadata completeness check
-        unknown_performer_count = sum(1 for it in self.items if it.performer in ("Unknown", "unknown", None, ""))
-        unknown_performance_count = sum(1 for it in self.items if not it.performance_id)
+        unknown_performer_count = sum(1 for it in self.items if not _known_identity(it.performer))
+        unknown_performance_count = sum(1 for it in self.items if not _known_identity(it.performance_id))
         performer_metadata_complete = (unknown_performer_count == 0)
         performance_metadata_complete = (unknown_performance_count == 0)
 
@@ -97,26 +133,18 @@ class DatasetManifest(BaseModel):
         }
 
         # 5. Isolation Status Assessment (distinguishing verified isolation from unverifiable incomplete metadata)
-        if len(performer_leakage) > 0:
-            performer_isolation_status = "leaked"
-        elif performer_metadata_complete:
-            performer_isolation_status = "verified_isolated"
-        else:
-            performer_isolation_status = "unverifiable_incomplete_metadata"
-
-        if len(perf_leakage) > 0:
-            performance_isolation_status = "leaked"
-        elif performance_metadata_complete:
-            performance_isolation_status = "verified_isolated"
-        else:
-            performance_isolation_status = "unverifiable_incomplete_metadata"
+        recording_metadata_complete = all(_known_identity(it.recording_id) for it in self.items)
+        recording_isolation_status = _isolation_status(bool(rec_leakage), recording_metadata_complete)
+        performer_isolation_status = _isolation_status(bool(performer_leakage), performer_metadata_complete)
+        performance_isolation_status = _isolation_status(bool(perf_leakage), performance_metadata_complete)
 
         return {
             "valid_no_recording_leakage": len(rec_leakage) == 0,
             "valid_no_performance_leakage": len(perf_leakage) == 0,
             "valid_no_performer_leakage": len(performer_leakage) == 0,
-            "is_performer_isolation_verified": performer_isolation_status == "verified_isolated",
-            "is_performance_isolation_verified": performance_isolation_status == "verified_isolated",
+            "recording_isolation_status": recording_isolation_status,
+            "is_performer_isolation_verified": performer_isolation_status == "verified",
+            "is_performance_isolation_verified": performance_isolation_status == "verified",
             "performer_isolation_status": performer_isolation_status,
             "performance_isolation_status": performance_isolation_status,
             "leaked_recordings": sorted(list(rec_leakage)),
@@ -144,9 +172,26 @@ class DatasetManifest(BaseModel):
         Does not require audio files to be present on disk.
         """
         import hashlib
-        sorted_items = sorted(self.items, key=lambda x: (x.recording_id, x.split, x.file_path))
+        sorted_items = sorted(self.items, key=_canonical_item_key)
         descriptors = [
-            f"{it.recording_id}:{it.split}:{it.raga}:{it.tonic_hz}:{it.performer}:{it.performance_id}:{it.duration_sec}:{it.sample_rate}"
+            json.dumps(
+                {
+                    "recording_id": it.recording_id,
+                    "split": it.split,
+                    "raga": it.raga,
+                    "tonic_hz": it.tonic_hz,
+                    "performer": it.performer,
+                    "performance_id": it.performance_id,
+                    "duration_sec": it.duration_sec,
+                    "sample_rate": it.sample_rate,
+                    "source": it.source,
+                    "tradition": it.tradition,
+                    "license": it.license,
+                    "metadata": it.metadata,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
             for it in sorted_items
         ]
         return hashlib.sha256("|".join(descriptors).encode("utf-8")).hexdigest()
@@ -156,10 +201,7 @@ class DatasetManifest(BaseModel):
         Computes and records SHA-256 content hashes for all physical audio files in the manifest.
         Mutates items in-place with their computed audio_sha256.
         """
-        import hashlib
         for it in self.items:
-            if it.audio_sha256 and not force_recompute:
-                continue
             p = Path(it.file_path)
             try:
                 h = hashlib.sha256()
@@ -170,43 +212,39 @@ class DatasetManifest(BaseModel):
             except OSError as exc:
                 raise OSError(f"Could not compute audio SHA-256 for {p}: {exc}") from exc
 
-    def compute_audio_content_fingerprint(
-        self,
-        force_recompute: bool = False,
-        populate_missing: bool = False,
-    ) -> str:
-        """
-        Computes a cryptographic SHA-256 fingerprint over the actual audio content bytes
-        of all recordings in the manifest.
-        
-        Guarantees that audio recordings have not been modified, clipped, truncated,
-        or replaced on disk.
-        """
+    def compute_audio_content_fingerprint(self, force_recompute: bool = True) -> str:
+        """Return a fail-closed fingerprint of every audio file's current bytes."""
         import hashlib
-        if force_recompute or populate_missing:
-            self.populate_audio_hashes(force_recompute=force_recompute)
 
-        sorted_items = sorted(self.items, key=lambda x: (x.recording_id, x.split, x.file_path))
-        descriptors: List[str] = []
-        for it in sorted_items:
-            h_val = it.audio_sha256
-            if (force_recompute or not h_val) and Path(it.file_path).exists():
-                try:
-                    h = hashlib.sha256()
-                    with open(it.file_path, "rb") as f:
-                        while chunk := f.read(65536):
-                            h.update(chunk)
-                    h_val = h.hexdigest()
-                    it.audio_sha256 = h_val
-                except Exception:
-                    h_val = "unreadable"
-            descriptors.append(f"{it.recording_id}:{h_val or 'none'}")
+        self._require_audio_hashes()
+        self.populate_audio_hashes(force_recompute=True)
+        return self._audio_content_fingerprint_from_hashes()
 
-        return hashlib.sha256("|".join(descriptors).encode("utf-8")).hexdigest()
+    def _require_audio_hashes(self) -> None:
+        import re
+
+        missing = [
+            item.file_path
+            for item in self.items
+            if not item.audio_sha256 or not re.fullmatch(r"[0-9a-f]{64}", item.audio_sha256)
+        ]
+        if missing:
+            raise ValueError(
+                f"Missing or invalid audio SHA-256 for {len(missing)} recording(s): {missing[:5]}"
+            )
+
+    def _audio_content_fingerprint_from_hashes(self) -> str:
+        import hashlib
+
+        audio_descriptors = [
+            {"recording_id": item.recording_id, "audio_sha256": item.audio_sha256}
+            for item in sorted(self.items, key=_canonical_item_key)
+        ]
+        payload = json.dumps(audio_descriptors, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def compute_dataset_fingerprint(
         self,
-        include_audio_content: bool = True,
         force_recompute: bool = False,
     ) -> str:
         """
@@ -217,17 +255,19 @@ class DatasetManifest(BaseModel):
         2. Audio content integrity (audio file byte hashes when audio_sha256 is present).
         """
         import hashlib
-        if include_audio_content and force_recompute:
-            self.populate_audio_hashes(force_recompute=True)
 
-        sorted_items = sorted(self.items, key=lambda x: (x.recording_id, x.split, x.file_path))
-        descriptors = []
-        for it in sorted_items:
-            base = f"{it.recording_id}:{it.split}:{it.raga}:{it.tonic_hz}:{it.performer}:{it.performance_id}:{it.duration_sec}:{it.sample_rate}"
-            if include_audio_content and it.audio_sha256:
-                base += f":{it.audio_sha256}"
-            descriptors.append(base)
-        return hashlib.sha256("|".join(descriptors).encode("utf-8")).hexdigest()
+        self._require_audio_hashes()
+        self.populate_audio_hashes(force_recompute=True)
+        payload = json.dumps(
+            {
+                "fingerprint_policy": "audio_sha256_v1",
+                "metadata_fingerprint": self.compute_metadata_fingerprint(),
+                "audio_content_fingerprint": self._audio_content_fingerprint_from_hashes(),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def get_class_counts(self) -> Dict[str, Dict[str, int]]:
         """Returns per-class item counts grouped by split."""
@@ -256,4 +296,3 @@ class DatasetManifest(BaseModel):
             data = json.load(f)
         items = [DatasetItem(**row) for row in data]
         return cls(items=items)
-

@@ -32,7 +32,7 @@ def temp_audio_file(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def sample_dataset_items(temp_audio_file: Path) -> list[DatasetItem]:
-    return [
+    items = [
         DatasetItem(
             recording_id="rec_001",
             raga="Yaman",
@@ -56,6 +56,9 @@ def sample_dataset_items(temp_audio_file: Path) -> list[DatasetItem]:
             metadata={"performer": "Artist B"},
         ),
     ]
+    for item in items:
+        item.audio_sha256 = compute_file_sha256(item.file_path)
+    return items
 
 
 def test_fingerprint_deterministic_and_matches(sample_dataset_items: list[DatasetItem]) -> None:
@@ -202,7 +205,7 @@ def test_validate_cache_manifest_provenance_records_paths_and_hashes(tmp_path: P
         DatasetItem(
             recording_id="rec_A",
             source="test",
-            file_path="/dummy/a.wav",
+            file_path=str(tmp_path / "a.wav"),
             raga="Bhairav",
             split="train",
             duration_sec=10.0,
@@ -211,13 +214,17 @@ def test_validate_cache_manifest_provenance_records_paths_and_hashes(tmp_path: P
         DatasetItem(
             recording_id="rec_B",
             source="test",
-            file_path="/dummy/b.wav",
+            file_path=str(tmp_path / "b.wav"),
             raga="Bhairav",
             split="test",
             duration_sec=10.0,
             sample_rate=24000,
         ),
     ])
+
+    Path(manifest.items[0].file_path).write_bytes(b"audio-a")
+    Path(manifest.items[1].file_path).write_bytes(b"audio-b")
+    manifest.populate_audio_hashes()
 
     expected_fp = manifest.compute_dataset_fingerprint()
     arrays = {
@@ -232,6 +239,7 @@ def test_validate_cache_manifest_provenance_records_paths_and_hashes(tmp_path: P
     }
     meta = {
         "dataset_fingerprint": expected_fp,
+        "fingerprint_policy": "audio_sha256_v1",
         "feature_schema_version": FeatureSchema.SCHEMA_VERSION,
     }
     FeatureCacheManager.save_atomic_cache(cache_path, arrays, meta)

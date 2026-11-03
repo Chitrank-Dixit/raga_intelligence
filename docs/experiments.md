@@ -4,7 +4,7 @@
 > **Notice on Historical / Superseded Hybrid Benchmarks**
 > In early prototyping (commit `7525287`), the hybrid training script contained a synthetic fallback (`rng.standard_normal((len(X_train), mert_dim))`) when cached MERT representations were not yet extracted. Any early figures reported under that ungrounded configuration are **INVALIDATED AND SUPERSEDED**. They are preserved in the historical section below strictly for auditability and must **never** be cited as evidence of MERT representation capability.
 >
-> All primary benchmark figures documented below represent **actual, verified audio extractions** using the real pretrained `m-a-p/MERT-v1-95M` model and real audio recordings from the Hindustani classical corpus.
+> **Historical registry:** Existing figures below document earlier experiments and are not the current canonical benchmark. The Hindustani CSV has no artist field; previous use of video IDs as performer labels was invalid. Artist-level isolation is unverifiable for that corpus. The current scientific report remains pending until a clean-commit evaluation succeeds.
 
 ---
 
@@ -20,7 +20,7 @@ Experiments are structured into three distinct status tiers:
 | **Exp 3** | Real Hybrid Pitch + MERT Late Fusion | **Completed & Verified** | `artifacts/checkpoints/hybrid_hindustani_model.pt` |
 | **Exp 4** | Empirical Raga Reference Centroids | **Completed & Verified** | `src/raga_intelligence/similarity/prototypes.py` |
 | **Exp 5** | Cross-Genre Melodic Similarity & Calibrated Abstention | **Completed & Verified** | `reports/cross_genre_evaluation.md` |
-| **Exp 6** | Phase 2.1 Scientific Evaluation Framework & Multi-Seed Benchmarks | **Completed & Verified** | `reports/scientific_evaluation_report.md` |
+| **Exp 6** | Phase 2.1 Scientific Evaluation Framework & Multi-Seed Benchmarks | **Historical; canonical rerun pending** | `reports/scientific_evaluation_report.md` |
 | *Historical* | *Synthetic Random-Embedding Hybrid Fallback* | **INVALIDATED / SUPERSEDED** | Historical commit `7525287` |
 | **Exp 7** | Sequential Transition & Melodic Motif (*Pakad*) Modeling | **Planned** | Roadmap Phase 2.2 |
 | **Exp 8** | Multi-Dataset Scaled Benchmark (50 Ragamala Corpus) | **Planned** | Roadmap Phase 2.3 |
@@ -41,10 +41,7 @@ Experiments are structured into three distinct status tiers:
 ### Experiment 1: Baseline Pitch-Derived Representation (Handcrafted Features)
 - **Hypothesis**: Tonic-normalized pitch class distribution (12 semi-tones relative to Shadja/Sa) and spectral chroma profiles contain sufficient discriminative signal to separate ragas with distinct scale structures.
 - **Dataset**: `neerajaabhyankar/hindustani-raag-small` (390 authentic recordings across 10 canonical ragas, hand-annotated Sa tonic in Hz).
-- **Split Strategy**: Group-based splitting on performance/recording ID to guarantee 0% data leakage across 82 unique performers:
-  - **Train partition**: 360 audio clips across 72 performers.
-  - **Test partition**: 30 held-out unseen audio clips across 10 performers (exactly 3 clips per canonical raga).
-  - Leakage checks: `valid_no_recording_leakage: True`, `valid_no_performance_leakage: True`, `valid_no_performer_leakage: True`.
+- **Split Strategy (historical run)**: Group-based splitting on performance/source IDs. The CSV contains no performer names, so performer-level isolation was not verifiable. Earlier counts labeled as performers were performance/source IDs and should not be interpreted as artist counts.
 - **Model Configuration**:
   - 35-dimensional feature vector:
     - 12-dim tonic-relative Pitch Class Distribution (PCD) via pitch tracking.
@@ -151,9 +148,9 @@ Experiments are structured into three distinct status tiers:
 - **Objective**: Establish a rigorous, reproducible, group-isolated evaluation protocol with expanded statistical metrics, cluster bootstrap confidence intervals, feature ablation, and automated error diagnostics.
 - **Protocol**:
   - **Dataset**: Hindustani classical audio collection (390 clips across 10 canonical ragas).
-  - **Group Isolation**: Group-based partitioning on performance/recording ID to guarantee 0% data leakage across 82 unique performances.
+  - **Group Isolation**: The historical split grouped by performance/source ID. Artist-level leakage was not verifiable from the available metadata.
   - **Multi-Seed Testing**: Evaluated across 3 deterministic random seeds (`[42, 123, 999]`) on strictly identical held-out test partitions.
-  - **Statistical Resampling**: 1,000 cluster bootstrap draws at the performance/performer level (never treating non-independent audio chunks as i.i.d.).
+  - **Statistical Resampling**: 1,000 cluster bootstrap draws at the performance/source level (never treating non-independent audio chunks as i.i.d.).
   - **Cryptographic Provenance**: Exact cache file paths and streaming SHA-256 digests (`da9170fec4d680183b6f31d4a27e98dddcd858c97ee3df1d735f34f5cc43621e` for handcrafted features, `d13f6f4878167e258d0b350575a63975685491f9f8af51c2136f8b93c1d3c9c8` for MERT embeddings) are verified and persisted in all experiment logs.
   - **Statistical Clarity**: Seed variation (Mean ± Std across seeds) quantifies algorithm optimization stability to initialization and training order; it is explicitly distinguished from test-sample generalization uncertainty (cluster bootstrap 95% CIs).
 - **Consolidated Multi-Seed Benchmark Results**:
@@ -260,7 +257,7 @@ The held-out test partition in the Hindustani Raag dataset contains **30 recordi
 
 1. **Granularity & Variance**: Each individual test clip accounts for $1/3 \approx 33.3\%$ of the per-class recall for that raga, and $1/30 \approx 3.33\%$ of the overall accuracy. A single misclassification shifts the per-class metric substantially.
 2. **Confidence Intervals**: With $N=30$ and an observed accuracy of $76.67\%$, the 95% Wilson score confidence interval spans approximately $[59.1\%, 88.2\%]$. While the margin over random baseline ($10.0\%$) is statistically significant ($p < 10^{-6}$), differences between adjacent model variants require caution.
-3. **Generalization Beyond Cohort**: Although 0% recording and performer leakage is strictly enforced across the 82 performers, testing on broader, more diverse corpora (e.g., Saraga, CompMusic Dunya) with hundreds of unseen performers is necessary before claiming general Hindustani production readiness.
+3. **Generalization Beyond Cohort**: The old corpus provides performance/source isolation only. Performer-level isolation remains unverified; testing with curated artist metadata and broader corpora is needed before making claims about unseen performers.
 
 ---
 

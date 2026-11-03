@@ -13,11 +13,11 @@
 ## ADR 002: Dataset Strategy and Research Data Governance
 - **Date**: 2026-10-30
 - **Status**: Accepted
-- **Context**: Indian classical music requires authentic audio recordings with verified raga annotations, tonic ground truth, and performer metadata. Commercial scraping violates copyright and lacks verified labels.
+- **Context**: Indian classical music evaluation requires authentic audio recordings with verified raga annotations and tonic ground truth. Performer isolation can only be claimed when genuine artist metadata is supplied; source/video IDs do not establish artist identity.
 - **Decision**:
   - Adopt the MTG CompMusic research corpus, specifically **Saraga Hindustani** (Zenodo Record `4301737`, licensed under CC BY-NC-SA 4.0) and IAM Raga Recognition Features (`7278505`).
   - Implement a modular `DatasetAdapter` interface supporting both local audio directories, Zenodo research archives, and synthetic test fixtures.
-  - Enforce strict split integrity: train/validation/test splits are constructed strictly at the recording/performance and artist level, preventing temporal frame leakage.
+  - Enforce recording and performance/source split integrity. Enforce artist-level isolation when artist metadata is available and otherwise report that level as unverifiable.
 - **Consequences**: Research compliance, legal redistribution safety, high label quality, and verifiable generalization benchmarks.
 
 ## ADR 003: Model Architecture - Hybrid Musical & Learned Representations

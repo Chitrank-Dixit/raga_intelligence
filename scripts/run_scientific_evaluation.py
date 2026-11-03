@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import logging
+import uuid
 from pathlib import Path
 from typing import Dict, List
 
@@ -26,7 +27,11 @@ from raga_intelligence.evaluation.error_analysis import (
     format_error_analysis_markdown,
 )
 from raga_intelligence.evaluation.reporting import generate_markdown_report
-from raga_intelligence.evaluation.tracker import ExperimentTracker
+from raga_intelligence.evaluation.tracker import (
+    ExperimentTracker,
+    assert_clean_source_tree,
+    validate_evaluation_records,
+)
 from raga_intelligence.features.cache import (
     compute_file_sha256,
     validate_cache_manifest_provenance,
@@ -47,6 +52,19 @@ def build_evaluation_manifest(dataset_dir: str | Path):
     return manifest
 
 
+def format_leakage_audit(audit: dict) -> list[str]:
+    """Render evidence-qualified isolation statuses without inferring performer data."""
+    return [
+        f"  - Recording Isolation: `{audit['recording_isolation_status']}`",
+        f"  - Performance Isolation: `{audit['performance_isolation_status']}`",
+        f"  - Performer Isolation: `{audit['performer_isolation_status']}`",
+    ]
+
+
+def evaluation_mode_banner(canonical: bool) -> str:
+    return "" if canonical else "> **NON-CANONICAL DEVELOPMENT RUN** — do not cite as the current benchmark."
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run Phase 2.1 Scientific Evaluation Framework.")
     parser.add_argument("--dataset-dir", type=str, default="./data/hindustani_dataset", help="Dataset directory")
@@ -56,7 +74,25 @@ def main():
     parser.add_argument("--output-report", type=str, default="./reports/scientific_evaluation_report.md", help="Destination markdown report path")
     parser.add_argument("--ablation-json", type=str, default="./artifacts/experiments/ablation_study.json", help="Path for ablation study JSON")
     parser.add_argument("--tracker-dir", type=str, default="./artifacts/experiments", help="Path for experiment logs")
+    parser.add_argument(
+        "--allow-dirty-development",
+        action="store_true",
+        help="Run non-canonical development evaluation in separate output locations",
+    )
     args = parser.parse_args()
+
+    commit_sha, canonical = assert_clean_source_tree(
+        allow_dirty_development=args.allow_dirty_development
+    )
+    if not canonical:
+        if Path(args.output_report).resolve() == Path("reports/scientific_evaluation_report.md").resolve():
+            args.output_report = "reports/development_scientific_evaluation_report.md"
+        if Path(args.tracker_dir).resolve() == Path("artifacts/experiments").resolve():
+            args.tracker_dir = "artifacts/experiments/development"
+        if Path(args.ablation_json).resolve() == Path("artifacts/experiments/ablation_study.json").resolve():
+            args.ablation_json = "artifacts/experiments/development/ablation_study.json"
+
+    evaluation_id = uuid.uuid4().hex
 
     device = settings.get_torch_device()
     logger.info(f"Starting Phase 2.1 Scientific Evaluation on device: {device}")
@@ -73,6 +109,18 @@ def main():
     logger.info(f"Loaded manifest with {len(manifest.items)} total clips across {len(set(it.raga for it in manifest.items))} ragas.")
 
     diagnostic = GroupAwarePartitioner.audit_grouping(manifest, group_col="performance_id")
+    split_audit = manifest.validate_splits()
+    failed_levels = [
+        level
+        for level, status in (
+            ("recording", split_audit["recording_isolation_status"]),
+            ("performance", split_audit["performance_isolation_status"]),
+            ("performer", split_audit["performer_isolation_status"]),
+        )
+        if status == "failed"
+    ]
+    if failed_levels:
+        raise ValueError(f"Scientific evaluation rejected split leakage at: {', '.join(failed_levels)}")
     logger.info(f"Total performances: {diagnostic.total_groups}. Fully partitionable: {diagnostic.is_fully_partitionable}")
     if diagnostic.limitations:
         for lim in diagnostic.limitations:
@@ -129,6 +177,9 @@ def main():
 
     # Common provenance dictionary persisted for all runs with exact file hashes
     common_provenance = {
+        "evaluation_id": evaluation_id,
+        "fingerprint_policy": "audio_sha256_v1",
+        "fingerprint_policy": "audio_sha256_v1",
         "dataset_fingerprint": val_report.dataset_fingerprint,
         "dataset_version": "1.0.0",
         "recording_ids_per_split": {
@@ -321,6 +372,25 @@ def main():
             **common_provenance,
         )
 
+    expected_model_names = {
+        "Baseline SVM",
+        "Random Forest",
+        "Logistic Regression",
+        "Frozen MERT (95M)",
+        "Hybrid (Pitch + MERT)",
+    }
+    expected_pairs = {
+        (model_name, seed) for model_name in expected_model_names for seed in args.seeds
+    }
+    evaluation_records = validate_evaluation_records(
+        tracker.list_runs(),
+        evaluation_id=evaluation_id,
+        expected_pairs=expected_pairs,
+        require_clean=canonical,
+    )
+    if any(record.code_version != commit_sha for record in evaluation_records):
+        raise ValueError("Current evaluation records do not match the clean-start Git commit SHA")
+
     # =========================================================================
     # 4. Feature Ablation Study (Task 4)
     # =========================================================================
@@ -342,7 +412,7 @@ def main():
     ablation_path = Path(args.ablation_json)
     with open(ablation_path, "r", encoding="utf-8") as ablation_file:
         ablation_artifact = json.load(ablation_file)
-    latest_run = tracker.list_runs()[-1]
+    latest_run = evaluation_records[-1]
     ablation_artifact.update(
         {
             "code_version": latest_run.code_version,
@@ -351,11 +421,15 @@ def main():
             "evaluation_split_fingerprint": common_provenance[
                 "evaluation_split_fingerprint"
             ],
+            "fingerprint_policy": "audio_sha256_v1",
             "model_configuration": {
                 "classifier": "LogisticRegression(max_iter=1000)",
                 "mert_model_revision": settings.model.mert_model_revision,
                 "random_seed": primary_seed,
             },
+            "lockfile_hash": latest_run.lockfile_hash,
+            "execution_device": str(device),
+            "system_environment": latest_run.system_environment,
         }
     )
     with open(ablation_path, "w", encoding="utf-8") as ablation_file:
@@ -397,23 +471,27 @@ def main():
     logger.info(f"=== Generating Comprehensive Markdown Report at {args.output_report} ===")
     rep_lines = [
         "# Scientific Evaluation Report: Indian Classical Raga Recognition",
+        *([] if canonical else [evaluation_mode_banner(canonical), ""]),
         "**Phase**: Phase 2.1 — Scientific Evaluation Framework",
         f"**Execution Device**: `{device}`",
         f"**Seeds Evaluated**: `{args.seeds}`",
         f"**Primary Seed**: `{primary_seed}`",
         f"**Dataset Fingerprint (audio SHA-256 included)**: `{val_report.dataset_fingerprint}`",
-        f"**Code Revision (Git commit)**: `{tracker.list_runs()[-1].code_version if tracker.list_runs() else 'not yet recorded'}`",
-        f"**Working Tree Dirty**: `{tracker.list_runs()[-1].working_tree_dirty if tracker.list_runs() else 'unknown'}`",
-        f"**Working Tree Fingerprint**: `{tracker.list_runs()[-1].working_tree_fingerprint if tracker.list_runs() else 'unknown'}`",
+        f"**Fingerprint Policy**: `audio_sha256_v1`",
+        f"**Code Revision (Git commit)**: `{commit_sha}`",
+        f"**Working Tree Clean**: `{not evaluation_records[-1].working_tree_dirty}`",
+        f"**Lockfile SHA-256**: `{evaluation_records[-1].lockfile_hash}`",
         f"**Evaluation Split Fingerprint**: `{common_provenance['evaluation_split_fingerprint']}`",
         f"**MERT Model Revision**: `{settings.model.mert_model_revision}`",
+        f"**Canonical Evaluation**: `{canonical}`",
         "",
         "## 1. Executive Summary & Core Findings",
         "This report provides an empirical, statistically grounded benchmark of Indian classical raga recognition "
         "across 10 canonical ragas using the Hindustani audio corpus (390 clips total, 360 train, 30 held-out test). "
-        "All models are evaluated on the exact same held-out test partition with zero recording, performance, or "
-        "performer leakage. Statistical uncertainty is computed using non-parametric cluster bootstrap resampling (1000 draws) "
-        "at the performance/performer level to preserve intra-recording correlation.",
+        "All models are evaluated on the same held-out split. Recording and performance isolation are audited; "
+        f"performer isolation status is `{split_audit['performer_isolation_status']}`. "
+        "Statistical uncertainty is computed using non-parametric cluster bootstrap resampling (1000 draws) "
+        "at the performance/source level to preserve intra-recording correlation.",
         "",
         "### Key Takeaways",
         f"1. **Baseline Superiority of Tonic-Relative Handcrafted Features**: The handcrafted SVM baseline achieves "
@@ -436,10 +514,25 @@ def main():
         "",
         ModelBenchmarkRunner.format_comparison_markdown_table(aggregated_models),
         "",
+        "## Model Configurations and Seeds",
+        "| Model | Architecture | Hyperparameters | Features | Seeds |",
+        "| :--- | :--- | :--- | :--- | :--- |",
+    ]
+    for model_name in sorted({record.model_name for record in evaluation_records}):
+        model_records = [record for record in evaluation_records if record.model_name == model_name]
+        first = model_records[0]
+        rep_lines.append(
+            f"| {model_name} | `{first.model_architecture}` | "
+            f"`{json.dumps(first.hyperparameters, sort_keys=True)}` | "
+            f"`{json.dumps(first.feature_config, sort_keys=True)}` | "
+            f"`{sorted(record.seed for record in model_records)}` |"
+        )
+    rep_lines.extend([
+        "",
         f"### Primary Seed ({primary_seed}) Statistical Generalization Uncertainty (95% Cluster Bootstrap)",
         f"Resampling performed over {len(set(test_groups))} unique performance groups ({len(test_items)} test clips). "
-        f"Quantifies generalization bounds to unseen performances/performers.",
-    ]
+        f"Quantifies generalization bounds to unseen performances, not performers.",
+    ])
 
     n_test_clusters = len(set(test_groups))
     if n_test_clusters < 15:
@@ -500,9 +593,7 @@ def main():
         f"- **Distinct Performances**: `{diagnostic.total_groups}`",
         f"- **Full Partitionability across all Ragas**: `{'Yes' if diagnostic.is_fully_partitionable else 'Conditional'}`",
         "- **Data Leakage Verification**:",
-        "  - Recording Leakage: `0.0%` (Zero clips overlap across train/test)",
-        "  - Performance Leakage: `0.0%` (Zero YouTube/audio sources overlap across train/test)",
-        "  - Performer Leakage: `0.0%` (Zero performers overlap across train/test)",
+        *format_leakage_audit(split_audit),
         "",
         "### Grouping Limitations & Observations",
     ])
@@ -515,14 +606,16 @@ def main():
         "---",
         "",
         "## 6. Execution Environment & Reproducibility",
-        f"- **Operating System**: `{tracker.list_runs()[0].system_environment['os'] if tracker.list_runs() else 'N/A'}`",
-        f"- **Python Version**: `{tracker.list_runs()[0].system_environment['python_version'] if tracker.list_runs() else 'N/A'}`",
-        f"- **PyTorch Version**: `{tracker.list_runs()[0].system_environment['torch_version'] if tracker.list_runs() else 'N/A'}`",
-        f"- **Librosa Version**: `{tracker.list_runs()[0].system_environment['librosa_version'] if tracker.list_runs() else 'N/A'}`",
-        f"- **Scikit-Learn Version**: `{tracker.list_runs()[0].system_environment['sklearn_version'] if tracker.list_runs() else 'N/A'}`",
-        f"- **Transformers Version**: `{tracker.list_runs()[0].system_environment['transformers_version'] if tracker.list_runs() else 'N/A'}`",
+        f"- **Operating System**: `{evaluation_records[0].system_environment['os']}`",
+        f"- **Python Version**: `{evaluation_records[0].system_environment['python_version']}`",
+        f"- **PyTorch Version**: `{evaluation_records[0].system_environment['torch_version']}`",
+        f"- **Librosa Version**: `{evaluation_records[0].system_environment['librosa_version']}`",
+        f"- **Scikit-Learn Version**: `{evaluation_records[0].system_environment['sklearn_version']}`",
+        f"- **Transformers Version**: `{evaluation_records[0].system_environment['transformers_version']}`",
         f"- **Device Used**: `{device}`",
-        f"- **Experiment Tracker Logs**: Stored as individual JSON records in `{args.tracker_dir}/`",
+        f"- **Experiment ID**: `{evaluation_id}`",
+        f"- **Current Evaluation Records**: `{len(evaluation_records)}` records in `{args.tracker_dir}/`",
+        f"- **Lockfile SHA-256**: `{evaluation_records[-1].lockfile_hash}`",
     ])
 
     report_content = "\n".join(rep_lines)
@@ -537,7 +630,7 @@ def main():
     print("=" * 70)
     print(f"Report: {out_path}")
     print(f"Ablation JSON: {args.ablation_json}")
-    print(f"Experiments logged: {len(tracker.list_runs())}")
+    print(f"Experiments logged in this evaluation: {len(evaluation_records)}")
     print("=" * 70 + "\n")
 
 

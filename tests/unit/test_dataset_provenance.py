@@ -27,7 +27,7 @@ from raga_intelligence.features.cache import (
 from raga_intelligence.features.schema import FeatureSchema
 
 
-def create_mock_manifest() -> DatasetManifest:
+def create_mock_manifest(audio_dir: Path) -> DatasetManifest:
     """Builds a test manifest with 2 ragas, multiple performers, and explicit splits."""
     manifest = DatasetManifest()
     # Raga Bhairav: 2 performers
@@ -35,7 +35,7 @@ def create_mock_manifest() -> DatasetManifest:
         manifest.add_item(DatasetItem(
             recording_id=f"bhairav_clip_{i}",
             source="Test",
-            file_path=f"/fake/bhairav_{i}.wav",
+            file_path=str(audio_dir / f"bhairav_{i}.wav"),
             raga="Bhairav",
             performer="Perf_1" if i < 2 else "Perf_2",
             performance_id="Perf_1" if i < 2 else "Perf_2",
@@ -48,7 +48,7 @@ def create_mock_manifest() -> DatasetManifest:
         manifest.add_item(DatasetItem(
             recording_id=f"yaman_clip_{i}",
             source="Test",
-            file_path=f"/fake/yaman_{i}.wav",
+            file_path=str(audio_dir / f"yaman_{i}.wav"),
             raga="Yaman",
             performer="Perf_3" if i < 2 else "Perf_4",
             performance_id="Perf_3" if i < 2 else "Perf_4",
@@ -56,12 +56,16 @@ def create_mock_manifest() -> DatasetManifest:
             sample_rate=24000,
             split="train" if i < 3 else "test",
         ))
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    for index, item in enumerate(manifest.items):
+        Path(item.file_path).write_bytes(f"audio-{index}".encode())
+    manifest.populate_audio_hashes()
     return manifest
 
 
-def test_dataset_fingerprint_deterministic_and_sensitive():
-    manifest1 = create_mock_manifest()
-    manifest2 = create_mock_manifest()
+def test_dataset_fingerprint_deterministic_and_sensitive(tmp_path: Path):
+    manifest1 = create_mock_manifest(tmp_path / "first")
+    manifest2 = create_mock_manifest(tmp_path / "second")
 
     fp1 = manifest1.compute_dataset_fingerprint()
     fp2 = manifest2.compute_dataset_fingerprint()
@@ -73,7 +77,7 @@ def test_dataset_fingerprint_deterministic_and_sensitive():
     assert manifest2.compute_dataset_fingerprint() != fp1
 
     # Tampering with a split alters the fingerprint
-    manifest3 = create_mock_manifest()
+    manifest3 = create_mock_manifest(tmp_path / "third")
     manifest3.items[0].split = "test"
     assert manifest3.compute_dataset_fingerprint() != fp1
 
@@ -173,8 +177,9 @@ def test_incomplete_performer_metadata_diagnostics():
     ))
 
     validation = manifest.validate_splits()
-    assert validation["performer_isolation_status"] == "unverifiable_incomplete_metadata"
-    assert validation["performance_isolation_status"] == "unverifiable_incomplete_metadata"
+    assert validation["performer_isolation_status"] == "not_verifiable"
+    assert validation["performance_isolation_status"] == "not_verifiable"
+    assert validation["recording_isolation_status"] == "verified"
 
     diag = GroupAwarePartitioner.audit_grouping(manifest, group_col="performer")
     assert diag.unknown_group_items_count == 1
@@ -182,12 +187,12 @@ def test_incomplete_performer_metadata_diagnostics():
 
 
 def test_cache_manifest_provenance_success_and_failure_modes(tmp_path: Path):
-    manifest = create_mock_manifest()
+    manifest = create_mock_manifest(tmp_path / "audio")
     train_items = [it for it in manifest.items if it.split == "train"]
     test_items = [it for it in manifest.items if it.split == "test"]
 
     dataset_fp = manifest.compute_dataset_fingerprint()
-    content_hash = compute_manifest_content_fingerprint(manifest.items, include_file_stats=False)
+    content_hash = compute_manifest_content_fingerprint(manifest.items)
 
     feat_arrays = {
         "X_train": np.ones((len(train_items), 35), dtype=np.float32),
@@ -201,6 +206,7 @@ def test_cache_manifest_provenance_success_and_failure_modes(tmp_path: Path):
     }
     feat_meta = {
         "dataset_fingerprint": dataset_fp,
+        "fingerprint_policy": "audio_sha256_v1",
         "feature_schema_version": FeatureSchema.SCHEMA_VERSION,
         "manifest_hash": content_hash,
     }
@@ -233,6 +239,11 @@ def test_cache_manifest_provenance_success_and_failure_modes(tmp_path: Path):
     with pytest.raises(ValueError, match="schema version mismatch"):
         validate_cache_manifest_provenance(manifest, bad_schema_cache, raise_on_error=True)
 
+    bad_policy_cache = dict(feat_arrays)
+    bad_policy_cache["metadata"] = {**feat_meta, "fingerprint_policy": "metadata_only_v1"}
+    with pytest.raises(ValueError, match="fingerprint policy"):
+        validate_cache_manifest_provenance(manifest, bad_policy_cache, raise_on_error=True)
+
     # 5. Swapped or misaligned recording IDs fail explicitly
     swapped_ids_cache = dict(feat_arrays)
     swapped_ids_cache["metadata"] = feat_meta
@@ -255,6 +266,7 @@ def test_cache_manifest_provenance_success_and_failure_modes(tmp_path: Path):
         "splits_test": np.array(["test"] * len(test_items)),
         "metadata": {
             "dataset_fingerprint": dataset_fp,
+            "fingerprint_policy": "audio_sha256_v1",
             "feature_schema_version": FeatureSchema.SCHEMA_VERSION,
         },
     }
@@ -325,6 +337,67 @@ def test_metadata_vs_audio_content_fingerprint_distinction(tmp_path: Path):
     # 3. Overall dataset fingerprint MUST change to invalidate downstream caches
     dataset_fp_after = manifest.compute_dataset_fingerprint(force_recompute=True)
     assert dataset_fp_before != dataset_fp_after
+
+
+def test_audio_fingerprint_fails_closed_and_is_path_independent(tmp_path: Path):
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    left.mkdir()
+    right.mkdir()
+    (left / "clip.wav").write_bytes(b"identical bytes")
+    (right / "clip.wav").write_bytes(b"identical bytes")
+
+    def manifest_at(path: Path, populate_hash: bool) -> DatasetManifest:
+        manifest = DatasetManifest(items=[DatasetItem(
+            recording_id="clip", source="test", file_path=str(path), raga="Bhairav",
+            duration_sec=1.0, sample_rate=24000,
+        )])
+        if populate_hash:
+            manifest.populate_audio_hashes()
+        return manifest
+
+    with pytest.raises(ValueError, match="Missing or invalid audio SHA-256"):
+        manifest_at(left / "clip.wav", False).compute_dataset_fingerprint()
+    assert (
+        manifest_at(left / "clip.wav", True).compute_dataset_fingerprint()
+        == manifest_at(right / "clip.wav", True).compute_dataset_fingerprint()
+    )
+    left_items = manifest_at(left / "clip.wav", True).items
+    right_items = manifest_at(right / "clip.wav", True).items
+    assert compute_manifest_content_fingerprint(left_items) == compute_manifest_content_fingerprint(right_items)
+
+
+def test_audio_fingerprint_fails_for_missing_or_unreadable_audio(tmp_path: Path):
+    missing = DatasetManifest(items=[DatasetItem(
+        recording_id="missing", source="test", file_path=str(tmp_path / "missing.wav"),
+        raga="Bhairav", duration_sec=1.0, sample_rate=24000, audio_sha256="0" * 64,
+    )])
+    with pytest.raises(OSError, match="Could not compute audio SHA-256"):
+        missing.compute_dataset_fingerprint()
+
+    unreadable_path = tmp_path / "unreadable.wav"
+    unreadable_path.write_bytes(b"audio")
+    unreadable = DatasetManifest(items=[DatasetItem(
+        recording_id="unreadable", source="test", file_path=str(unreadable_path),
+        raga="Bhairav", duration_sec=1.0, sample_rate=24000, audio_sha256="0" * 64,
+    )])
+    import builtins
+    original_open = builtins.open
+
+    def deny(path, *args, **kwargs):
+        if Path(path) == unreadable_path:
+            raise PermissionError("denied")
+        return original_open(path, *args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(builtins, "open", deny)
+        with pytest.raises(OSError, match="Could not compute audio SHA-256"):
+            unreadable.compute_dataset_fingerprint()
+
+
+def test_metadata_fingerprint_has_explicit_distinct_semantics(tmp_path: Path):
+    manifest = create_mock_manifest(tmp_path / "audio")
+    assert manifest.compute_metadata_fingerprint() != manifest.compute_dataset_fingerprint()
 
 
 def test_interconnected_multi_raga_performer_cycle_impossible_coverage():
