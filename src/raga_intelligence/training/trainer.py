@@ -433,7 +433,7 @@ def train_mert_pipeline(
     batch_size: int = 16,
     seed: int = 42,
     model_name: str = "m-a-p/MERT-v1-95M",
-    model_revision: str = "main",
+    model_revision: Optional[str] = None,
     pooling_type: Literal["mean", "max", "mean_max_concat"] = "mean_max_concat",
     force_refresh: bool = False,
     device: Optional[torch.device] = None,
@@ -443,6 +443,7 @@ def train_mert_pipeline(
     torch.manual_seed(seed)
     np.random.seed(seed)
     device = device or settings.get_torch_device()
+    model_revision = model_revision or settings.model.mert_model_revision
 
     E_train, y_train, E_val, y_val, E_test, y_test = extract_mert_embeddings_from_manifest(
         manifest=manifest,
@@ -522,7 +523,7 @@ def train_hybrid_pipeline(
     weight_decay: float = 1e-2,
     seed: int = 42,
     model_name: str = "m-a-p/MERT-v1-95M",
-    model_revision: str = "main",
+    model_revision: Optional[str] = None,
     pooling_type: Literal["mean", "max", "mean_max_concat"] = "mean_max_concat",
     force_refresh: bool = False,
     device: Optional[torch.device] = None,
@@ -532,6 +533,7 @@ def train_hybrid_pipeline(
     torch.manual_seed(seed)
     np.random.seed(seed)
     device = device or settings.get_torch_device()
+    model_revision = model_revision or settings.model.mert_model_revision
 
     # 1. Extract/load explicit musical features
     X_train, y_train, X_val, y_val, X_test, y_test = extract_features_from_manifest(

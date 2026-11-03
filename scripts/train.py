@@ -63,7 +63,7 @@ def main():
     parser.add_argument(
         "--mert-revision",
         type=str,
-        default="main",
+        default=settings.model.mert_model_revision,
         help="Model revision (branch/tag/commit) for MERT",
     )
     parser.add_argument(
