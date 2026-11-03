@@ -17,6 +17,11 @@ from raga_intelligence.datasets.manifest import DatasetItem, DatasetManifest
 logger = logging.getLogger(__name__)
 
 
+def _known_group_identity(value: Any) -> bool:
+    """Use the same unknown-value semantics as DatasetManifest identity audits."""
+    return value is not None and str(value).strip().lower() not in {"", "unknown", "none", "null"}
+
+
 @dataclass
 class GroupingDiagnostic:
     """Diagnostic audit of group distribution, multi-raga entanglement, and partition feasibility."""
@@ -74,7 +79,7 @@ class GroupAwarePartitioner:
 
         for it in manifest.items:
             raw_g = getattr(it, group_col, None)
-            if raw_g in ("Unknown", "unknown", None, ""):
+            if not _known_group_identity(raw_g):
                 unknown_items_count += 1
                 g_key = f"__unknown_{it.recording_id}__"
             else:
@@ -230,7 +235,7 @@ class GroupAwarePartitioner:
 
         for it in manifest.items:
             raw_g = getattr(it, group_col, None)
-            if raw_g in ("Unknown", "unknown", None, ""):
+            if not _known_group_identity(raw_g):
                 g_key = f"__unknown_{it.recording_id}__"
                 unknown_groups.add(g_key)
             else:

@@ -4,7 +4,7 @@
 > **Notice on Historical / Superseded Hybrid Benchmarks**
 > In early prototyping (commit `7525287`), the hybrid training script contained a synthetic fallback (`rng.standard_normal((len(X_train), mert_dim))`) when cached MERT representations were not yet extracted. Any early figures reported under that ungrounded configuration are **INVALIDATED AND SUPERSEDED**. They are preserved in the historical section below strictly for auditability and must **never** be cited as evidence of MERT representation capability.
 >
-> **Historical registry:** Existing figures below document earlier experiments and are not the current canonical benchmark. The Hindustani CSV has no artist field; previous use of video IDs as performer labels was invalid. Artist-level isolation is unverifiable for that corpus. The current scientific report is generated from clean commit `6eec1891715ba79e1bd607b058fc8c3426c02c76` (evaluation `9fedf9990c3d4576952a49b0999b9876`); recording/performance isolation are verified and artist isolation remains unverifiable.
+> **Historical registry:** Existing figures below document earlier experiments and are not the current canonical benchmark. The Hindustani CSV has no artist field; previous use of video IDs as performer labels was invalid. Artist-level isolation is unverifiable for that corpus. The benchmark execution revision is clean commit `6eec1891715ba79e1bd607b058fc8c3426c02c76` (evaluation `9fedf9990c3d4576952a49b0999b9876`). PR HEAD before the current uncommitted review changes is `71902a2802eca91dcdf721f17af7c58f89a0ff84`; the benchmark is not claimed as run on that HEAD. Recording/performance isolation are verified and artist isolation remains unverifiable.
 
 ---
 
@@ -162,8 +162,8 @@ Experiments are structured into three distinct status tiers:
 ## 2.1 Final Remediation & Validation Record
 
 - **Leakage semantics**: legacy no-leakage booleans are true only when isolation is verified. Missing performer or performance metadata produces `not_verifiable` and a false boolean; observed overlap produces `failed`.
-- **Strict scientific partitioning**: evaluation rejects infeasible performance-group structure or any canonical raga missing from train or test before reading caches or constructing model evaluators. The final run passed with all 10 ragas covered and 82 performance/source groups.
-- **Test suite**: 137 tests passed on the remediation code revision; integration tests include rejection before cache/model evaluation. API smoke tests separately passed (2 tests).
+- **Strict scientific partitioning**: evaluation requires a known performance ID for every recording and an exact `verified` performance-isolation status. It rejects leakage, missing/unrecognized statuses, infeasible performance-group structure, or any canonical raga missing from train/test before reading caches or initializing models. Performer isolation may remain `not_verifiable` when artist metadata is absent. The recorded canonical run passed with all 10 ragas covered and 82 performance/source groups.
+- **Test suite**: 141 tests passed on the final integrity-check changes; integration tests include rejection before cache/model evaluation. API smoke tests separately passed (2 tests).
 - **Ruff**: not run because Ruff is not installed/cached in the offline environment. No configured type checker was found.
 - **Podman**: image build could not be validated because the existing Podman machine identity was inaccessible (`Access is denied`). Podman and WSL configuration were not changed.
 

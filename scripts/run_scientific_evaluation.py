@@ -66,8 +66,57 @@ def format_leakage_audit(audit: dict) -> list[str]:
 
 
 def validate_scientific_partition(manifest) -> tuple[GroupingDiagnostic, dict]:
-    """Reject infeasible grouping or missing canonical classes before loading caches/models."""
+    """Fail closed on unverifiable/leaking splits before loading caches or initializing models."""
     diagnostic = GroupAwarePartitioner.audit_grouping(manifest, group_col="performance_id")
+
+    if not diagnostic.is_isolation_verifiable or diagnostic.unknown_group_items_count:
+        raise InfeasiblePartitionError(
+            "Scientific evaluation requires a performance_id for every recording; "
+            f"{diagnostic.unknown_group_items_count} recording(s) have missing or unknown "
+            "performance identity, so performance isolation cannot be verified."
+        )
+
+    split_audit = manifest.validate_splits()
+    recording_status = split_audit.get("recording_isolation_status")
+    if recording_status != "verified":
+        detail = (
+            f"; leaked recordings: {split_audit.get('leaked_recordings')}"
+            if recording_status == "failed"
+            else "; recording isolation metadata/status is missing or incomplete"
+        )
+        raise ValueError(
+            "Scientific evaluation requires recording isolation status 'verified'; "
+            f"got {recording_status!r}{detail}."
+        )
+
+    performance_status = split_audit.get("performance_isolation_status")
+    if performance_status != "verified":
+        if performance_status == "not_verifiable":
+            detail = (
+                f" {split_audit.get('unknown_performance_count', 0)} recording(s) lack a known "
+                "performance_id."
+            )
+        elif performance_status == "failed":
+            detail = f" Leaked performance IDs: {split_audit.get('leaked_performances')}."
+        else:
+            detail = " The isolation status is missing or unrecognized."
+        raise ValueError(
+            "Scientific evaluation requires performance isolation status exactly 'verified'; "
+            f"got {performance_status!r}.{detail}"
+        )
+
+    performer_status = split_audit.get("performer_isolation_status")
+    if performer_status not in {"verified", "failed", "not_verifiable"}:
+        raise ValueError(
+            "Scientific evaluation received a missing or unrecognized performer isolation "
+            f"status: {performer_status!r}."
+        )
+    if performer_status == "failed":
+        raise ValueError(
+            "Scientific evaluation rejected performer leakage: "
+            f"{split_audit.get('leaked_performers')}"
+        )
+
     if not diagnostic.is_fully_partitionable:
         raise InfeasiblePartitionError(
             "Scientific evaluation requires every canonical raga to be representable in "
@@ -90,18 +139,6 @@ def validate_scientific_partition(manifest) -> tuple[GroupingDiagnostic, dict]:
             f"splits; missing coverage: {missing_by_split}"
         )
 
-    split_audit = manifest.validate_splits()
-    failed_levels = [
-        level
-        for level, status in (
-            ("recording", split_audit["recording_isolation_status"]),
-            ("performance", split_audit["performance_isolation_status"]),
-            ("performer", split_audit["performer_isolation_status"]),
-        )
-        if status == "failed"
-    ]
-    if failed_levels:
-        raise ValueError(f"Scientific evaluation rejected split leakage at: {', '.join(failed_levels)}")
     return diagnostic, split_audit
 
 
