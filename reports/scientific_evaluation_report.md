@@ -5,7 +5,7 @@
 **Primary Seed**: `42`
 **Dataset Fingerprint (audio SHA-256 included)**: `252c55be0ff9dc4375bd38d796ffe5fa33ea43a28cd0daac2b1a6e4eaf88c823`
 **Fingerprint Policy**: `audio_sha256_v1`
-**Code Revision (Git commit)**: `c5731c6d74e761f4b38c4f3e3b6368858389a076`
+**Code Revision (Git commit)**: `6eec1891715ba79e1bd607b058fc8c3426c02c76`
 **Working Tree Clean**: `True`
 **Lockfile SHA-256**: `cf8239ba12fe3e9a23886a7b102824d8c19bb7a667ec11deccaf060d57c7e00d`
 **Evaluation Split Fingerprint**: `b5ba9f621f933b29b76fe0909fa99fa37ced8cc10626d8c2f0a169c91f54f171`
@@ -170,6 +170,6 @@ Evaluates the individual and grouped discriminative power of musical features on
 - **Scikit-Learn Version**: `1.9.1`
 - **Transformers Version**: `5.22.1`
 - **Device Used**: `cpu`
-- **Experiment ID**: `85880373f06540f98a77637907727180`
+- **Experiment ID**: `9fedf9990c3d4576952a49b0999b9876`
 - **Current Evaluation Records**: `15` records in `./artifacts/experiments/`
 - **Lockfile SHA-256**: `cf8239ba12fe3e9a23886a7b102824d8c19bb7a667ec11deccaf060d57c7e00d`

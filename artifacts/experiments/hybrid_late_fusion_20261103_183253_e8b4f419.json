@@ -1,69 +1,71 @@
 {
-  "run_id": "baseline_svm_20261103_183047_d6522993",
-  "experiment_name": "Baseline SVM",
-  "timestamp": "2026-11-03T18:30:47.242250+00:00",
-  "code_version": "c5731c6d74e761f4b38c4f3e3b6368858389a076",
+  "run_id": "hybrid_late_fusion_20261103_183253_e8b4f419",
+  "experiment_name": "Hybrid Late Fusion",
+  "timestamp": "2026-11-03T18:32:53.066471+00:00",
+  "code_version": "6eec1891715ba79e1bd607b058fc8c3426c02c76",
   "seed": 999,
-  "model_name": "Baseline SVM",
-  "model_architecture": "SVC(kernel=rbf, C=10.0)",
+  "model_name": "Hybrid (Pitch + MERT)",
+  "model_architecture": "HybridRagaClassifier(DualStream->GELU->LateFusion)",
   "hyperparameters": {
-    "C": 10.0,
-    "kernel": "rbf"
+    "epochs": 25,
+    "lr": 0.001,
+    "weight_decay": 0.01
   },
   "feature_config": {
-    "type": "handcrafted_35",
-    "dim": 35
+    "type": "hybrid",
+    "musical_dim": 35,
+    "mert_dim": 1536
   },
   "dataset_name": "HindustaniRaagSmall",
   "dataset_split_info": {},
   "metrics": {
-    "accuracy": 0.4333,
-    "macro_f1": 0.4086,
-    "weighted_f1": 0.4086,
-    "multiclass_log_loss": 3.6264,
-    "brier_score": 1.1484,
-    "expected_calibration_error": 0.3821,
+    "accuracy": 0.4667,
+    "macro_f1": 0.481,
+    "weighted_f1": 0.481,
+    "multiclass_log_loss": 1.5507,
+    "brier_score": 0.7039,
+    "expected_calibration_error": 0.2411,
     "confidence_intervals": {
       "accuracy": {
-        "ci_lower": 0.2333,
-        "ci_upper": 0.6667,
-        "mean": 0.433,
-        "std": 0.1096,
+        "ci_lower": 0.3,
+        "ci_upper": 0.6333,
+        "mean": 0.4668,
+        "std": 0.0853,
         "n_groups": 10.0
       },
       "macro_f1": {
-        "ci_lower": 0.1398,
-        "ci_upper": 0.4195,
-        "mean": 0.2897,
-        "std": 0.0711,
+        "ci_lower": 0.1959,
+        "ci_upper": 0.4549,
+        "mean": 0.3335,
+        "std": 0.0656,
         "n_groups": 10.0
       },
       "weighted_f1": {
-        "ci_lower": 0.2157,
-        "ci_upper": 0.7021,
-        "mean": 0.4552,
-        "std": 0.1207,
+        "ci_lower": 0.3329,
+        "ci_upper": 0.6934,
+        "mean": 0.5232,
+        "std": 0.0918,
         "n_groups": 10.0
       },
       "brier_score": {
-        "ci_lower": 0.9586,
-        "ci_upper": 1.3184,
-        "mean": 1.1482,
-        "std": 0.0921,
+        "ci_lower": 0.5609,
+        "ci_upper": 0.847,
+        "mean": 0.7055,
+        "std": 0.0743,
         "n_groups": 10.0
       },
       "log_loss": {
-        "ci_lower": 2.8833,
-        "ci_upper": 4.278,
-        "mean": 3.6309,
-        "std": 0.3568,
+        "ci_lower": 1.1352,
+        "ci_upper": 2.0302,
+        "mean": 1.5514,
+        "std": 0.2259,
         "n_groups": 10.0
       },
       "ece": {
-        "ci_lower": 0.2959,
-        "ci_upper": 0.5264,
-        "mean": 0.4014,
-        "std": 0.0584,
+        "ci_lower": 0.1703,
+        "ci_upper": 0.4229,
+        "mean": 0.2929,
+        "std": 0.0651,
         "n_groups": 10.0
       }
     }
@@ -500,6 +502,6 @@
   "notes": "Phase 2.1 Scientific Benchmark",
   "working_tree_dirty": false,
   "working_tree_fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "evaluation_id": "85880373f06540f98a77637907727180",
+  "evaluation_id": "9fedf9990c3d4576952a49b0999b9876",
   "fingerprint_policy": "audio_sha256_v1"
 }

@@ -1,9 +1,9 @@
 {
-  "run_id": "baseline_logistic_regression_20261103_183053_ee517df7",
+  "run_id": "baseline_logistic_regression_20261103_183241_c9b01154",
   "experiment_name": "Baseline Logistic Regression",
-  "timestamp": "2026-11-03T18:30:53.483370+00:00",
-  "code_version": "c5731c6d74e761f4b38c4f3e3b6368858389a076",
-  "seed": 123,
+  "timestamp": "2026-11-03T18:32:41.405780+00:00",
+  "code_version": "6eec1891715ba79e1bd607b058fc8c3426c02c76",
+  "seed": 42,
   "model_name": "Logistic Regression",
   "model_architecture": "LogisticRegression(max_iter=1000)",
   "hyperparameters": {
@@ -25,44 +25,44 @@
     "confidence_intervals": {
       "accuracy": {
         "ci_lower": 0.3333,
-        "ci_upper": 0.7333,
-        "mean": 0.5295,
+        "ci_upper": 0.7008,
+        "mean": 0.5319,
         "std": 0.0958,
         "n_groups": 10.0
       },
       "macro_f1": {
-        "ci_lower": 0.23,
-        "ci_upper": 0.5081,
-        "mean": 0.3743,
-        "std": 0.0717,
+        "ci_lower": 0.2353,
+        "ci_upper": 0.5124,
+        "mean": 0.3722,
+        "std": 0.0732,
         "n_groups": 10.0
       },
       "weighted_f1": {
-        "ci_lower": 0.3825,
-        "ci_upper": 0.7629,
-        "mean": 0.5792,
-        "std": 0.0985,
+        "ci_lower": 0.3904,
+        "ci_upper": 0.77,
+        "mean": 0.5829,
+        "std": 0.0982,
         "n_groups": 10.0
       },
       "brier_score": {
-        "ci_lower": 1.141,
-        "ci_upper": 1.5423,
-        "mean": 1.3545,
-        "std": 0.1009,
+        "ci_lower": 1.1433,
+        "ci_upper": 1.5665,
+        "mean": 1.3528,
+        "std": 0.1072,
         "n_groups": 10.0
       },
       "log_loss": {
-        "ci_lower": 4.9448,
-        "ci_upper": 11.3107,
-        "mean": 7.7155,
-        "std": 1.7055,
+        "ci_lower": 4.9319,
+        "ci_upper": 11.9325,
+        "mean": 7.691,
+        "std": 1.8029,
         "n_groups": 10.0
       },
       "ece": {
-        "ci_lower": 0.4293,
-        "ci_upper": 0.6743,
-        "mean": 0.5529,
-        "std": 0.0636,
+        "ci_lower": 0.4265,
+        "ci_upper": 0.6951,
+        "mean": 0.5511,
+        "std": 0.0682,
         "n_groups": 10.0
       }
     }
@@ -499,6 +499,6 @@
   "notes": "Phase 2.1 Scientific Benchmark",
   "working_tree_dirty": false,
   "working_tree_fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "evaluation_id": "85880373f06540f98a77637907727180",
+  "evaluation_id": "9fedf9990c3d4576952a49b0999b9876",
   "fingerprint_policy": "audio_sha256_v1"
 }

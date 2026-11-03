@@ -11,8 +11,10 @@ from run_scientific_evaluation import (
     build_evaluation_manifest,
     evaluation_mode_banner,
     format_leakage_audit,
+    validate_scientific_partition,
 )
 import run_scientific_evaluation as scientific_evaluation
+from raga_intelligence.config import RAGA_LIST
 from raga_intelligence.datasets.manifest import DatasetItem, DatasetManifest
 from raga_intelligence.datasets.partitioning import InfeasiblePartitionError
 from raga_intelligence.features.cache import compute_manifest_content_fingerprint
@@ -112,3 +114,24 @@ def test_infeasible_partition_is_rejected_before_evaluation_cache_or_models(
 
     with pytest.raises(InfeasiblePartitionError, match="requires every canonical raga"):
         scientific_evaluation.main()
+
+
+def test_scientific_partition_requires_every_raga_in_train_and_test():
+    manifest = DatasetManifest(items=[
+        DatasetItem(
+            recording_id=f"{raga}_{group}",
+            source="Test",
+            file_path=f"{raga}_{group}.wav",
+            raga=raga,
+            performer=f"artist_{raga}_{group}",
+            performance_id=f"performance_{raga}_{group}",
+            duration_sec=10.0,
+            sample_rate=24000,
+            split="train",
+        )
+        for raga in RAGA_LIST
+        for group in range(2)
+    ])
+
+    with pytest.raises(InfeasiblePartitionError, match="missing coverage"):
+        validate_scientific_partition(manifest)
