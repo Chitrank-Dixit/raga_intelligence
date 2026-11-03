@@ -19,7 +19,7 @@ This project develops an evidence-driven machine learning proof of concept (PoC)
 ## 2. Core Principles & Design
 
 - **Evidence-Driven Baseline First**: Establishes empirical baselines using tonic-normalized pitch-class distributions before transfer learning.
-- **Strict Leakage Prevention**: Split generation strictly partitions audio at the **recording / performance and artist** level. Audio segments from the same performance never cross train and test boundaries.
+- **Split Integrity**: Splits are audited at recording and performance/source level. Artist isolation is reported as unverifiable unless genuine performer metadata is available.
 - **Honest Predictions**: Explicit separation between *closed-world classical classification* and *open-world cross-genre melodic similarity*.
 - **Container-First Workflow**: Local development and production containers configured via Podman and Compose.
 - **Resource & Hardware Awareness**: Automatic detection and verified tensor execution for NVIDIA GPU passthrough, paired with a reliable CPU fallback.
@@ -105,7 +105,58 @@ The initial research cohort covers 10 representative Hindustani ragas across div
 
 ## 7. Research Datasets & Licensing
 
+- **Hindustani Raag Corpus**: 390 authentic recordings across 10 canonical ragas (`neerajaabhyankar/hindustani-raag-small`) with ground-truth hand-annotated Sa tonic (Hz). Partitioned with 0% recording leakage (360 train, 30 held-out test).
 - **Saraga Hindustani**: Zenodo DOI `10.5281/zenodo.4301737` (CC BY-NC-SA 4.0).
 - **CompMusic IAM Features**: Zenodo DOI `10.5281/zenodo.7278505` (CC BY-NC-ND 4.0).
 - **Synthetic Test Fixtures**: Deterministically synthesized within `data/synthetic` under CC0-1.0 for reproducible CI testing without external network dependencies.
+
+---
+
+## 8. Empirical Benchmark Results
+
+Benchmark execution revision: clean commit `6eec1891715ba79e1bd607b058fc8c3426c02c76` (evaluation `9fedf9990c3d4576952a49b0999b9876`). The PR branch HEAD before this final review change set is `71902a2802eca91dcdf721f17af7c58f89a0ff84`; the benchmark is not claimed as having run on that HEAD or on the current uncommitted changes. Dataset audio-inclusive fingerprint: `252c55be0ff9dc4375bd38d796ffe5fa33ea43a28cd0daac2b1a6e4eaf88c823` (`audio_sha256_v1`); split fingerprint: `b5ba9f621f933b29b76fe0909fa99fa37ced8cc10626d8c2f0a169c91f54f171`. The corpus has 390 clips (360 train / 30 held-out), 82 performance/source groups and 10 test performance clusters. Recording and performance isolation are verified; performer isolation is **not verifiable** because artist metadata is absent. These are not artist-independent results.
+
+| Model | Macro-F1 (mean +/- seed SD) | Accuracy (mean +/- seed SD) | Evaluation configuration |
+| :--- | :---: | :---: | :--- |
+| Handcrafted SVM | 0.4086 +/- 0.0000 | 0.4333 +/- 0.0000 | 35 handcrafted features; RBF SVC, C=10 |
+| Random Forest | 0.3540 +/- 0.0168 | 0.3556 +/- 0.0157 | 100 trees; max depth 12 |
+| Logistic Regression | 0.5400 +/- 0.0000 | 0.5333 +/- 0.0000 | max_iter=1000 |
+| Frozen MERT | 0.2671 +/- 0.0328 | 0.3667 +/- 0.0272 | MERT revision `12af15fef9d0ac838c3f475bfbbf26d2060dd4f5`; 1536-d embeddings; 25 epochs |
+| Hybrid pitch + MERT | 0.4902 +/- 0.0469 | 0.4889 +/- 0.0567 | 35 handcrafted + 1536 MERT dimensions; 25 epochs |
+
+Seed runs: `[42, 123, 999]`; CPU; model configurations are recorded in the report. Lockfile SHA-256: `cf8239ba12fe3e9a23886a7b102824d8c19bb7a667ec11deccaf060d57c7e00d`. See [the full report](reports/scientific_evaluation_report.md) and the 15 experiment records for per-run provenance and metrics. Historical registry entries are not directly comparable unless their dataset, split, code, and model configurations match.
+---
+
+## 9. Cross-Genre Melodic Similarity & Calibrated Abstention
+
+The system decouples formal classical classification from open-world cross-genre melodic resemblance:
+
+| Track Name | Genre | Expected Resemblance | Top Predicted Match | Similarity Score | Confidence | Abstention Status |
+| :--- | :--- | :--- | :--- | :---: | :--- | :---: |
+| **Bollywood (Bhairavi Melody)** | Indian Film / Bollywood | `Bhairavi` | **Bhairavi** | 0.863 | High | No |
+| **Bollywood (Yaman Ballad)** | Indian Film / Bollywood | `Yaman` | **Yaman** | 0.852 | High | No |
+| **Western Pop (Major Pentatonic)** | Western Pop / Folk | `Bhoopali` | **Bhoopali** | 0.918 | High | No |
+| **Western Blues (Minor Pentatonic)**| Western Blues / Rock | `Malkauns` | **Malkauns** | 0.953 | High | No |
+| **Atonal Noise Control** | Unpitched Control | `Abstain` | **None** | 0.000 | N/A | **Yes (Correct)** |
+
+---
+
+## 10. CLI & Research Commands
+
+```powershell
+# Analyze any audio file with CLI inference runner
+python scripts/evaluate.py "path/to/song.mp3" --top-k 5
+
+# Run cross-genre evaluation benchmark
+python scripts/evaluate_cross_genre.py
+
+# Train baseline SVM on Hindustani dataset
+python scripts/train.py --dataset hindustani --model baseline --classifier-type svm
+
+# Train frozen MERT classification head
+python scripts/train.py --dataset hindustani --model mert_frozen --epochs 30
+
+# Train Hybrid Late-Fusion model
+python scripts/train.py --dataset hindustani --model hybrid --epochs 30
+```
 

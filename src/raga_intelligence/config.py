@@ -7,10 +7,10 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import torch
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -123,13 +123,17 @@ class FeatureConfig(BaseModel):
     n_mels: int = 128
     fmin: float = 55.0  # ~A1
     fmax: float = 2000.0  # upper vocal range
-    pitch_confidence_threshold: float = 0.6
+    pitch_tracker: Literal["pyin", "yin"] = "pyin"
+    pitch_confidence_threshold: float = 0.4
+    min_energy_threshold: float = 1e-4
     tonic_default_hz: float = 138.59  # C#3 (common Hindustani male tonic), or 220.0 (female tonic A3)
+    include_melodic_features: bool = False  # Set True to append 40-dim sequential features
 
 
 class ModelConfig(BaseModel):
     """Machine learning model settings."""
     mert_model_name: str = "m-a-p/MERT-v1-95M"
+    mert_model_revision: str = "12af15fef9d0ac838c3f475bfbbf26d2060dd4f5"  # Pinned immutable commit hash
     mert_output_dim: int = 768
     num_classes: int = len(RAGA_LIST)
     dropout: float = 0.3
@@ -172,29 +176,128 @@ class Settings(BaseSettings):
     # API
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
+    min_tonic_hz: float = Field(default=50.0, alias="MIN_TONIC_HZ", description="Minimum physically plausible singing tonic frequency in Hz")
+    max_tonic_hz: float = Field(default=1000.0, alias="MAX_TONIC_HZ", description="Maximum physically plausible singing tonic frequency in Hz")
+    max_concurrent_inferences: int = Field(
+        default=4,
+        ge=1,
+        le=64,
+        alias="MAX_CONCURRENT_INFERENCES",
+        description="Maximum concurrent audio inference/classification jobs allowed before 503 rejection."
+    )
+    inference_retry_after_sec: int = Field(
+        default=2,
+        ge=1,
+        le=60,
+        alias="INFERENCE_RETRY_AFTER_SEC",
+        description="Retry-After header value in seconds returned when inference capacity is saturated."
+    )
+
+    # CORS Configuration
+    cors_allowed_origins: List[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
+        alias="CORS_ALLOWED_ORIGINS",
+    )
+    cors_allow_credentials: bool = Field(default=False, alias="CORS_ALLOW_CREDENTIALS")
+    cors_allowed_methods: List[str] = Field(
+        default_factory=lambda: ["GET", "POST", "OPTIONS"],
+        alias="CORS_ALLOWED_METHODS",
+    )
+    cors_allowed_headers: List[str] = Field(
+        default_factory=lambda: ["Content-Type", "Accept", "Authorization", "X-Request-ID"],
+        alias="CORS_ALLOWED_HEADERS",
+    )
+
+    @field_validator("cors_allowed_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: Any) -> List[str]:
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
+
+    @model_validator(mode="after")
+    def validate_cors_security(self) -> Settings:
+        if self.cors_allow_credentials and "*" in self.cors_allowed_origins:
+            raise ValueError(
+                "CORS security violation: allow_credentials cannot be True when wildcard ('*') origin is configured."
+            )
+        if self.env.lower() == "production":
+            if not self.cors_allowed_origins:
+                raise ValueError("Production configuration requires non-empty CORS_ALLOWED_ORIGINS.")
+            if "*" in self.cors_allowed_origins:
+                raise ValueError("Production CORS violation: wildcard origin ('*') is strictly forbidden in production.")
+        return self
 
     def get_torch_device(self) -> torch.device:
         """
         Determines the safe execution device with verified tensor execution.
         Falls back to CPU if CUDA is requested but incompatible (e.g., sm_120 without compiled kernels).
         """
-        pref = self.device_preference.lower()
-        if pref == "cpu":
-            return torch.device("cpu")
+        device, _ = verify_execution_device(self.device_preference)
+        return device
 
-        if torch.cuda.is_available() and pref in ("auto", "cuda"):
-            try:
-                test_dev = torch.device("cuda:0")
-                x = torch.ones((10, 10), device=test_dev, dtype=torch.float32)
-                _ = torch.matmul(x, x)
-                return test_dev
-            except Exception as e:
-                logger.warning(
-                    f"CUDA available but tensor execution failed ({e}). Falling back to CPU."
-                )
-                return torch.device("cpu")
 
-        return torch.device("cpu")
+def verify_execution_device(device_preference: str = "auto") -> tuple[torch.device, dict[str, Any]]:
+    """
+    Formally verifies compute device availability and actual tensor execution.
+    Logs hardware capabilities, architecture, and whether explicit CPU fallback occurred.
+    """
+    pref = device_preference.lower()
+    diag: dict[str, Any] = {
+        "requested_preference": pref,
+        "cuda_is_available": torch.cuda.is_available(),
+        "device_count": 0,
+        "device_name": None,
+        "compute_capability": None,
+        "tensor_execution_verified": False,
+        "fallback_to_cpu": False,
+        "selected_device": "cpu",
+        "diagnostic_reason": "",
+    }
+
+    if pref == "cpu":
+        diag["diagnostic_reason"] = "Explicit CPU preference configured by operator."
+        return torch.device("cpu"), diag
+
+    if torch.cuda.is_available() and pref in ("auto", "cuda"):
+        diag["device_count"] = torch.cuda.device_count()
+        diag["device_name"] = torch.cuda.get_device_name(0)
+        cap = torch.cuda.get_device_capability(0)
+        diag["compute_capability"] = f"sm_{cap[0]}{cap[1]}"
+
+        try:
+            test_dev = torch.device("cuda:0")
+            # Verify actual tensor allocation and matrix kernel execution
+            x = torch.ones((32, 32), device=test_dev, dtype=torch.float32)
+            y = torch.matmul(x, x)
+            torch.cuda.synchronize()
+            _ = float(y[0, 0].item())
+            diag["tensor_execution_verified"] = True
+            diag["selected_device"] = "cuda:0"
+            diag["diagnostic_reason"] = (
+                f"Verified CUDA GPU execution on {diag['device_name']} ({diag['compute_capability']})."
+            )
+            logger.info(diag["diagnostic_reason"])
+            return test_dev, diag
+
+        except Exception as e:
+            diag["fallback_to_cpu"] = True
+            diag["selected_device"] = "cpu"
+            diag["diagnostic_reason"] = (
+                f"CUDA GPU detected ({diag['device_name']} {diag['compute_capability']}), "
+                f"but kernel execution failed ({e}). Explicitly falling back to CPU."
+            )
+            logger.warning(diag["diagnostic_reason"])
+            return torch.device("cpu"), diag
+
+    diag["selected_device"] = "cpu"
+    diag["diagnostic_reason"] = "No CUDA GPU detected or supported by host environment."
+    return torch.device("cpu"), diag
 
 
 # Global singleton instance

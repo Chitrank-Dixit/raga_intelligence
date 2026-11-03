@@ -13,6 +13,7 @@ import numpy as np
 from raga_intelligence.audio.loader import AudioSignal
 from raga_intelligence.audio.segmentation import AudioSegment
 from raga_intelligence.config import FeatureConfig, settings
+from raga_intelligence.features.melodic import MelodicFeatureExtractor, MelodicSequentialFeatures
 from raga_intelligence.features.pitch import compute_tonic_relative_pcd, extract_pitch_contour
 from raga_intelligence.features.swara import SWARA_NAMES
 from raga_intelligence.features.tonic import estimate_tonic
@@ -28,6 +29,9 @@ class MusicalFeatures:
     dominant_swaras: list[str]  # Top swaras active in the excerpt
     voiced_ratio: float         # Proportion of voiced frames
     feature_vector: np.ndarray  # Concatenated 1D representation for scikit-learn models
+    tonic_confidence: float = 1.0
+    tonic_candidates: list[float] = None
+    melodic_features: Optional[MelodicSequentialFeatures] = None
 
 
 class BaselineFeatureExtractor:
@@ -35,6 +39,10 @@ class BaselineFeatureExtractor:
 
     def __init__(self, config: Optional[FeatureConfig] = None):
         self.config = config or settings.features
+        self.melodic_extractor = MelodicFeatureExtractor(
+            hop_length=self.config.hop_length,
+            sr=24000,
+        )
 
     def extract(
         self,
@@ -48,25 +56,33 @@ class BaselineFeatureExtractor:
         else:
             samples = audio_or_segment
 
-        # 1. Estimate or verify tonic
-        tonic_hz = estimate_tonic(
+        # 1. Estimate or verify tonic with uncertainty quantification
+        tonic_res = estimate_tonic(
             audio=samples,
             sr=sr,
             ground_truth_tonic_hz=ground_truth_tonic_hz,
+            return_full_result=True,
         )
+        tonic_hz = tonic_res.tonic_hz
+        tonic_confidence = tonic_res.confidence
+        tonic_candidates = [c.frequency_hz for c in tonic_res.candidates]
 
-        # 2. Extract pitch contour
-        f0, voiced = extract_pitch_contour(
+        # 2. Extract pitch contour using probabilistic voicing
+        f0, voiced, probs = extract_pitch_contour(
             audio=samples,
             sr=sr,
             hop_length=self.config.hop_length,
             fmin=self.config.fmin,
             fmax=self.config.fmax,
+            method=getattr(self.config, "pitch_tracker", "pyin"),
+            voicing_threshold=getattr(self.config, "pitch_confidence_threshold", 0.4),
+            min_energy_threshold=getattr(self.config, "min_energy_threshold", 1e-4),
+            return_voicing_probs=True,
         )
         voiced_ratio = float(np.mean(voiced)) if len(voiced) > 0 else 0.0
 
-        # 3. Compute 12-bin tonic-relative Pitch Class Distribution (PCD)
-        pcd = compute_tonic_relative_pcd(f0, voiced, tonic_hz, num_bins=12)
+        # 3. Compute 12-bin tonic-relative Pitch Class Distribution (PCD) with probability weighting
+        pcd = compute_tonic_relative_pcd(f0, voiced, tonic_hz, num_bins=12, weights=probs)
 
         # 4. Compute Chroma CQT and align cyclically with estimated tonic
         try:
@@ -110,6 +126,16 @@ class BaselineFeatureExtractor:
             np.array([voiced_ratio], dtype=np.float32),
         ])
 
+        # 8. Optional sequential melodic features (40 dims)
+        mel_feats: Optional[MelodicSequentialFeatures] = None
+        if getattr(self.config, "include_melodic_features", False):
+            mel_feats = self.melodic_extractor.extract(
+                f0=f0,
+                voiced_flag=voiced,
+                tonic_hz=tonic_hz,
+            )
+            combined_features = np.concatenate([combined_features, mel_feats.feature_vector])
+
         return MusicalFeatures(
             tonic_hz=tonic_hz,
             pcd=pcd,
@@ -118,5 +144,8 @@ class BaselineFeatureExtractor:
             dominant_swaras=dominant_swaras,
             voiced_ratio=voiced_ratio,
             feature_vector=combined_features,
+            tonic_confidence=tonic_confidence,
+            tonic_candidates=tonic_candidates,
+            melodic_features=mel_feats,
         )
 

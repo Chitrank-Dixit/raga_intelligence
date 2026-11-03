@@ -38,6 +38,8 @@ def test_ready_endpoint(client: TestClient):
     assert response.status_code == 200
     data = response.json()
     assert data["ready"] is True
+    assert "active_inference_backend" in data
+    assert len(data["models_loaded"]) >= 2
     assert data["supported_ragas_count"] == 10
 
 
@@ -46,7 +48,8 @@ def test_models_endpoint(client: TestClient):
     assert response.status_code == 200
     data = response.json()
     assert len(data["supported_ragas"]) == 10
-    assert "m-a-p/MERT-v1-95M" in data["available_encoders"]
+    assert "TonicRelativePCD" in data["available_encoders"]
+    assert "AlignedChromaCQT" in data["available_encoders"]
 
 
 def test_analyze_valid_audio(client: TestClient):
@@ -74,4 +77,26 @@ def test_analyze_empty_file(client: TestClient):
     response = client.post("/analyze", files=files)
     assert response.status_code == 400
     assert "empty" in response.json()["detail"]
+
+
+def test_analyze_fake_extension_invalid_header(client: TestClient):
+    """File has .wav extension but contains non-audio ASCII/binary garbage."""
+    files = {"audio_file": ("exploit.wav", b"NOT_A_REAL_WAV_HEADER_JUST_GARBAGE_PAYLOAD", "audio/wav")}
+    response = client.post("/analyze", files=files)
+    assert response.status_code == 400
+    assert "File content does not match a supported audio format" in response.json()["detail"]
+
+
+def test_analyze_oversized_file_rejected(client: TestClient):
+    """File exceeding 50 MB limit must trigger HTTP 413 immediately."""
+    # 51 MB dummy payload with valid WAV magic header at start
+    oversized_size = 51 * 1024 * 1024
+    header = b"RIFF" + (oversized_size - 8).to_bytes(4, "little") + b"WAVEfmt "
+    oversized_data = header + b"\x00" * (oversized_size - len(header))
+
+    files = {"audio_file": ("large.wav", oversized_data, "audio/wav")}
+    response = client.post("/analyze", files=files)
+    assert response.status_code == 413
+    assert "exceeds maximum allowed limit" in response.json()["detail"]
+
 

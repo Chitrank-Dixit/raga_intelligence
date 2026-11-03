@@ -1,5 +1,5 @@
 """
-Report generation and markdown summary formatting.
+Report generation, markdown summary formatting, and evaluation presentation.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from raga_intelligence.evaluation.metrics import EvaluationMetrics
 def generate_markdown_report(
     metrics: EvaluationMetrics,
     experiment_name: str,
-    dataset_name: str = "Saraga Hindustani / Synthetic Evaluation",
+    dataset_name: str = "Saraga Hindustani / Authentic Evaluation",
     notes: Optional[str] = None,
 ) -> str:
     """Formats EvaluationMetrics into an evidence-driven GitHub markdown report."""
@@ -23,11 +23,42 @@ def generate_markdown_report(
         "## Overall Summary",
         f"- **Macro-F1 Score**: `{metrics.macro_f1:.4f}`",
         f"- **Weighted-F1 Score**: `{metrics.weighted_f1:.4f}`",
+        f"- **Macro Precision**: `{metrics.macro_precision:.4f}`",
+        f"- **Macro Recall**: `{metrics.macro_recall:.4f}`",
         f"- **Accuracy (Supplementary)**: `{metrics.accuracy:.4f}`",
     ]
 
+    if metrics.multiclass_log_loss is not None:
+        lines.append(f"- **Multiclass Log Loss**: `{metrics.multiclass_log_loss:.4f}`")
+
+    if metrics.brier_score is not None:
+        lines.append(f"- **Brier Score**: `{metrics.brier_score:.4f}`")
+
     if metrics.expected_calibration_error is not None:
         lines.append(f"- **Expected Calibration Error (ECE)**: `{metrics.expected_calibration_error:.4f}`")
+
+    if metrics.n_groups is not None:
+        lines.append(f"- **Independent Resampling Groups**: `{metrics.n_groups}`")
+        if metrics.n_groups < 15:
+            lines.append(
+                f"- **Statistical Limitation Warning**: Resampling group count (`n={metrics.n_groups}`) is small (<15). "
+                f"Cluster bootstrap coverage may be biased; interpret confidence intervals with caution."
+            )
+
+    if metrics.confidence_intervals:
+        lines.extend([
+            "",
+            f"### Statistical Confidence Intervals (95% Grouped Bootstrap across {metrics.n_groups or 'N/A'} clusters)",
+            "| Metric | Bootstrap Mean | Std Err | 95% CI Lower | 95% CI Upper |",
+            "| :--- | :---: | :---: | :---: | :---: |",
+        ])
+        for metric_key, ci_stats in metrics.confidence_intervals.items():
+            lines.append(
+                f"| **{metric_key}** | `{ci_stats.get('mean', 0.0):.4f}` | "
+                f"`{ci_stats.get('std', 0.0):.4f}` | "
+                f"`{ci_stats.get('ci_lower', 0.0):.4f}` | "
+                f"`{ci_stats.get('ci_upper', 0.0):.4f}` |"
+            )
 
     lines.extend([
         "",
@@ -67,4 +98,3 @@ def generate_markdown_report(
         ])
 
     return "\n".join(lines)
-

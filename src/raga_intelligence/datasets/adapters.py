@@ -138,6 +138,7 @@ class SyntheticDatasetAdapter(BaseDatasetAdapter):
                     raga=raga,
                     tradition="Hindustani",
                     performer=performer,
+                    performance_id=rec_id,
                     duration_sec=self.duration_sec,
                     sample_rate=self.sample_rate,
                     tonic_hz=tonic_hz,

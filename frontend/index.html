@@ -125,11 +125,36 @@
     const analyzeBtn = document.getElementById('analyze-btn');
     const statusMsg = document.getElementById('status-msg');
 
+    function updateSelectedFileDisplay(file) {
+      fileLabel.textContent = '';
+      const strong = document.createElement('strong');
+      strong.textContent = 'Selected: ';
+      fileLabel.appendChild(strong);
+      const text = document.createTextNode(`${file.name} (${(file.size / (1024*1024)).toFixed(2)} MB)`);
+      fileLabel.appendChild(text);
+      analyzeBtn.disabled = false;
+    }
+
+    function setStatus(message, type = 'info') {
+      statusMsg.textContent = '';
+      const span = document.createElement('span');
+      if (type === 'error') {
+        span.style.color = '#ef4444';
+        span.textContent = `Error: ${message}`;
+      } else if (type === 'success') {
+        span.style.color = 'var(--success)';
+        span.textContent = message;
+      } else {
+        span.style.color = 'var(--accent)';
+        span.textContent = message;
+      }
+      statusMsg.appendChild(span);
+    }
+
     fileInput.addEventListener('change', (e) => {
       if (e.target.files.length > 0) {
         selectedFile = e.target.files[0];
-        fileLabel.innerHTML = `<strong>Selected:</strong> ${selectedFile.name} (${(selectedFile.size / (1024*1024)).toFixed(2)} MB)`;
-        analyzeBtn.disabled = false;
+        updateSelectedFileDisplay(selectedFile);
       }
     });
 
@@ -143,15 +168,14 @@
       if (e.dataTransfer.files.length > 0) {
         fileInput.files = e.dataTransfer.files;
         selectedFile = e.dataTransfer.files[0];
-        fileLabel.innerHTML = `<strong>Selected:</strong> ${selectedFile.name} (${(selectedFile.size / (1024*1024)).toFixed(2)} MB)`;
-        analyzeBtn.disabled = false;
+        updateSelectedFileDisplay(selectedFile);
       }
     });
 
     async function submitAnalysis() {
       if (!selectedFile) return;
       analyzeBtn.disabled = true;
-      statusMsg.innerHTML = '<span style="color: var(--accent);">Processing audio: decoding, pitch contour extraction, and raga alignment...</span>';
+      setStatus('Processing audio: decoding, pitch contour extraction, and raga alignment...', 'info');
       document.getElementById('results-container').style.display = 'none';
 
       const formData = new FormData();
@@ -169,57 +193,138 @@
         }
         const data = await res.json();
         renderResults(data);
-        statusMsg.innerHTML = '<span style="color: var(--success);">Analysis completed successfully.</span>';
+        setStatus('Analysis completed successfully.', 'success');
       } catch (err) {
-        statusMsg.innerHTML = `<span style="color: #ef4444;">Error: ${err.message}</span>`;
+        setStatus(err.message, 'error');
       } finally {
         analyzeBtn.disabled = false;
       }
     }
 
+    function createMatchCard(m) {
+      const pct = Math.round(m.similarity_score * 100);
+      const card = document.createElement('div');
+      card.className = 'match-card';
+
+      // Header
+      const header = document.createElement('div');
+      header.className = 'match-header';
+
+      const title = document.createElement('span');
+      title.className = 'match-title';
+      title.textContent = m.raga_name;
+
+      const scorePill = document.createElement('span');
+      scorePill.className = 'score-pill';
+      scorePill.textContent = `${pct}% (${m.confidence_level})`;
+
+      header.appendChild(title);
+      header.appendChild(scorePill);
+      card.appendChild(header);
+
+      // Meter Bar
+      const meterBar = document.createElement('div');
+      meterBar.className = 'meter-bar';
+      const meterFill = document.createElement('div');
+      meterFill.className = 'meter-fill';
+      meterFill.style.width = `${Math.min(100, Math.max(0, pct))}%`;
+      meterBar.appendChild(meterFill);
+      card.appendChild(meterBar);
+
+      // Details
+      const details = document.createElement('div');
+      details.className = 'details';
+
+      const pThhat = document.createElement('p');
+      const strongThhat = document.createElement('strong');
+      strongThhat.textContent = 'Thhat: ';
+      pThhat.appendChild(strongThhat);
+      pThhat.appendChild(document.createTextNode(m.thhat || '-'));
+
+      pThhat.appendChild(document.createTextNode(' | '));
+      const strongVadi = document.createElement('strong');
+      strongVadi.textContent = 'Vadi/Samvadi: ';
+      pThhat.appendChild(strongVadi);
+      pThhat.appendChild(document.createTextNode(`${m.vadi || '-'} / ${m.samvadi || '-'}`));
+      details.appendChild(pThhat);
+
+      // Aligned Notes
+      const pAligned = document.createElement('p');
+      pAligned.style.marginTop = '0.4rem';
+      const strongAligned = document.createElement('strong');
+      strongAligned.textContent = 'Aligned Notes: ';
+      pAligned.appendChild(strongAligned);
+
+      if (m.matching_swaras && m.matching_swaras.length > 0) {
+        m.matching_swaras.forEach(s => {
+          const chip = document.createElement('span');
+          chip.className = 'swara-chip';
+          chip.textContent = s;
+          pAligned.appendChild(chip);
+        });
+      } else {
+        pAligned.appendChild(document.createTextNode('None'));
+      }
+      details.appendChild(pAligned);
+
+      // Foreign Notes
+      if (m.foreign_swaras && m.foreign_swaras.length > 0) {
+        const pForeign = document.createElement('p');
+        pForeign.style.marginTop = '0.3rem';
+        const strongForeign = document.createElement('strong');
+        strongForeign.textContent = 'Foreign Notes: ';
+        pForeign.appendChild(strongForeign);
+
+        m.foreign_swaras.forEach(s => {
+          const chip = document.createElement('span');
+          chip.className = 'swara-chip foreign-chip';
+          chip.textContent = s;
+          pForeign.appendChild(chip);
+        });
+        details.appendChild(pForeign);
+      }
+
+      // Peak Windows / Evidence Segments
+      if (m.evidence_segments && m.evidence_segments.length > 0) {
+        const pEvidence = document.createElement('p');
+        pEvidence.style.marginTop = '0.3rem';
+        pEvidence.style.fontSize = '0.75rem';
+        const strongEv = document.createElement('strong');
+        strongEv.textContent = 'Peak Windows: ';
+        pEvidence.appendChild(strongEv);
+        pEvidence.appendChild(document.createTextNode(m.evidence_segments.join(', ')));
+        details.appendChild(pEvidence);
+      }
+
+      card.appendChild(details);
+      return card;
+    }
+
     function renderResults(data) {
       document.getElementById('results-container').style.display = 'block';
-      document.getElementById('res-duration').innerText = `${data.duration_sec}s`;
-      document.getElementById('res-tonic').innerText = `${data.estimated_tonic_hz} Hz`;
-      document.getElementById('res-voiced').innerText = `${(data.voiced_ratio * 100).toFixed(1)}%`;
-      document.getElementById('res-swaras').innerText = data.detected_dominant_swaras.join('  ') || 'None';
-      document.getElementById('caveat-text').innerText = data.caveat_statement;
+      document.getElementById('res-duration').textContent = `${data.duration_sec}s`;
+      document.getElementById('res-tonic').textContent = `${data.estimated_tonic_hz} Hz`;
+      document.getElementById('res-voiced').textContent = `${(data.voiced_ratio * 100).toFixed(1)}%`;
+      document.getElementById('res-swaras').textContent = data.detected_dominant_swaras.join('  ') || 'None';
+      document.getElementById('caveat-text').textContent = data.caveat_statement;
 
       const abstentionBox = document.getElementById('abstention-alert');
       if (data.abstention_triggered) {
         abstentionBox.style.display = 'block';
-        abstentionBox.innerHTML = `<strong>Calibrated Abstention:</strong> ${data.abstention_reason}`;
+        abstentionBox.textContent = '';
+        const strong = document.createElement('strong');
+        strong.textContent = 'Calibrated Abstention: ';
+        abstentionBox.appendChild(strong);
+        abstentionBox.appendChild(document.createTextNode(data.abstention_reason || 'Low confidence / unpitched recording.'));
       } else {
         abstentionBox.style.display = 'none';
       }
 
       const grid = document.getElementById('matches-grid');
-      grid.innerHTML = '';
+      grid.textContent = '';
 
       data.ranked_matches.forEach(m => {
-        const pct = Math.round(m.similarity_score * 100);
-        const card = document.createElement('div');
-        card.className = 'match-card';
-
-        const matchingChips = m.matching_swaras.map(s => `<span class="swara-chip">${s}</span>`).join('');
-        const foreignChips = m.foreign_swaras.map(s => `<span class="swara-chip foreign-chip">${s}</span>`).join('');
-
-        card.innerHTML = `
-          <div class="match-header">
-            <span class="match-title">${m.raga_name}</span>
-            <span class="score-pill">${pct}% (${m.confidence_level})</span>
-          </div>
-          <div class="meter-bar">
-            <div class="meter-fill" style="width: ${pct}%"></div>
-          </div>
-          <div class="details">
-            <p><strong>Thhat:</strong> ${m.thhat} | <strong>Vadi/Samvadi:</strong> ${m.vadi} / ${m.samvadi}</p>
-            <p style="margin-top: 0.4rem;"><strong>Aligned Notes:</strong> ${matchingChips || 'None'}</p>
-            ${m.foreign_swaras.length > 0 ? `<p style="margin-top: 0.3rem;"><strong>Foreign Notes:</strong> ${foreignChips}</p>` : ''}
-            ${m.evidence_segments.length > 0 ? `<p style="margin-top: 0.3rem; font-size: 0.75rem;"><strong>Peak Windows:</strong> ${m.evidence_segments.join(', ')}</p>` : ''}
-          </div>
-        `;
-        grid.appendChild(card);
+        grid.appendChild(createMatchCard(m));
       });
     }
   </script>

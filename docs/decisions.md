@@ -13,11 +13,11 @@
 ## ADR 002: Dataset Strategy and Research Data Governance
 - **Date**: 2026-10-30
 - **Status**: Accepted
-- **Context**: Indian classical music requires authentic audio recordings with verified raga annotations, tonic ground truth, and performer metadata. Commercial scraping violates copyright and lacks verified labels.
+- **Context**: Indian classical music evaluation requires authentic audio recordings with verified raga annotations and tonic ground truth. Performer isolation can only be claimed when genuine artist metadata is supplied; source/video IDs do not establish artist identity.
 - **Decision**:
   - Adopt the MTG CompMusic research corpus, specifically **Saraga Hindustani** (Zenodo Record `4301737`, licensed under CC BY-NC-SA 4.0) and IAM Raga Recognition Features (`7278505`).
   - Implement a modular `DatasetAdapter` interface supporting both local audio directories, Zenodo research archives, and synthetic test fixtures.
-  - Enforce strict split integrity: train/validation/test splits are constructed strictly at the recording/performance and artist level, preventing temporal frame leakage.
+  - Enforce recording and performance/source split integrity. Enforce artist-level isolation when artist metadata is available and otherwise report that level as unverifiable.
 - **Consequences**: Research compliance, legal redistribution safety, high label quality, and verifiable generalization benchmarks.
 
 ## ADR 003: Model Architecture - Hybrid Musical & Learned Representations
@@ -40,4 +40,24 @@
     2. `MelodicSimilarityEngine`: Open-world similarity measurement computing prototype cosine distance, tonic-relative swara distribution correlation, and segment-level evidence accumulation.
   - Implement uncertainty estimation and an explicit *abstention mechanism* ("insufficient evidence" / out-of-distribution detection) when similarity scores fall below calibrated thresholds.
 - **Consequences**: Honest predictions, avoidance of false claims, and musically grounded explanations for cross-genre users.
+
+## ADR 005: Empirical Centroid Extraction over Theoretical Pitch Histograms
+- **Date**: 2026-10-31
+- **Status**: Accepted
+- **Context**: Theoretical pitch distributions synthesized purely from textbook note sets and vadi/samvadi heuristics fail to capture natural human performance variance, intonation nuances, and habitual transitional notes (*sangatis*).
+- **Decision**:
+  - Compute 12-bin tonic-relative Pitch Class Distribution (PCD) centroids directly from the 360 training recordings of the authentic Hindustani corpus.
+  - Populate empirical centroids into `RagaPrototypeRegistry` as the primary reference vector (`effective_pcd`), retaining theoretical distributions as fallback.
+- **Consequences**: Melodic similarity accurately matches empirical performance practices and improves Bhattacharyya distance discrimination on real audio.
+
+## ADR 006: Multi-Criterion Acoustic Gate for Out-of-Distribution Abstention
+- **Date**: 2026-10-31
+- **Status**: Accepted
+- **Context**: Audio inputs submitted to a public API may consist of spoken language, field noise, unpitched percussion, or synthesizer noise without modal tonicity.
+- **Decision**:
+  - Enforce a 3-stage hierarchical gate prior to raga matching:
+    1. **Spectral Flatness Gate**: Reject audio with Wiener entropy > 0.15 (indicative of white noise, unpitched percussion, or hiss).
+    2. **Voiced Ratio Gate**: Reject audio with voiced frame proportion < 0.15 (indicative of silence, ambient noise, or spoken dialogue).
+    3. **PCD Variance Gate**: Reject audio with pitch distribution standard deviation < 0.025 (indicative of uniform atonal noise).
+- **Consequences**: Completely suppresses spurious raga predictions on noise and spoken audio, delivering transparent diagnostic reasons without false classifications.
 

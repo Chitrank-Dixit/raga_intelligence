@@ -1,5 +1,6 @@
 # Python / virtual environment
 __pycache__/
+.pytest_cache/
 *.py[cod]
 *$py.class
 .venv/
@@ -16,6 +17,7 @@ data/cache/
 data/zenodo/
 data/hindustani_dataset/
 data/synthetic/
+data/cross_genre/
 *.mp3
 *.wav
 *.flac
@@ -55,4 +57,9 @@ Thumbs.db
 
 # Podman / Docker
 .container_tmp/
+
+# Non-canonical development evaluation outputs
+artifacts/experiments/development/
+reports/development_*
+all_fix_prompts.txt
 
