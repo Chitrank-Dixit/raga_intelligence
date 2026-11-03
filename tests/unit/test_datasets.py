@@ -194,6 +194,28 @@ def test_manifest_performer_and_performance_leakage_detection():
     assert "concert_alpha" in val3["leaked_performances"]
 
 
+def test_incomplete_metadata_cannot_pass_legacy_leakage_booleans():
+    manifest = DatasetManifest(items=[
+        DatasetItem(
+            recording_id="rec_unknown",
+            source="Test",
+            file_path="unknown.wav",
+            raga="Bhairav",
+            performer=None,
+            performance_id=None,
+            duration_sec=10.0,
+            sample_rate=24000,
+            split="train",
+        )
+    ])
+
+    audit = manifest.validate_splits()
+    assert audit["performer_isolation_status"] == "not_verifiable"
+    assert audit["performance_isolation_status"] == "not_verifiable"
+    assert audit["valid_no_performer_leakage"] is False
+    assert audit["valid_no_performance_leakage"] is False
+
+
 def test_split_summary_and_class_distribution():
     manifest = DatasetManifest()
     manifest.add_item(
@@ -332,7 +354,8 @@ def test_hindustani_dataset_adapter():
     validation = manifest.validate_splits()
     assert validation["valid_no_recording_leakage"] is True
     assert validation["valid_no_performance_leakage"] is True
-    assert validation["valid_no_performer_leakage"] is True
+    assert validation["valid_no_performer_leakage"] is False
+    assert validation["performer_isolation_status"] == "not_verifiable"
     assert validation["train_recordings_count"] == 360
     assert validation["test_recordings_count"] == 30
 

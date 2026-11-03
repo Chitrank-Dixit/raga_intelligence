@@ -294,11 +294,11 @@ class GroupAwarePartitioner:
                     chosen_test_group = cand
                     break
 
-            # If no candidate was completely safe, fall back to first unassigned candidate
-            if chosen_test_group is None:
-                chosen_test_group = shuffled_candidates[0]
-
-            group_split_assignment[chosen_test_group] = "test"
+            # Leave the component unassigned when no test choice can preserve train
+            # coverage. Later phases may find a feasible assignment; strict mode
+            # rejects any result that still lacks class coverage.
+            if chosen_test_group is not None:
+                group_split_assignment[chosen_test_group] = "test"
 
         # Phase B: Ensure every testable raga has at least one group in train
         for raga in all_ragas:

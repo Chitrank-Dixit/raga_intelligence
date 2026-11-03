@@ -140,8 +140,8 @@ class DatasetManifest(BaseModel):
 
         return {
             "valid_no_recording_leakage": len(rec_leakage) == 0,
-            "valid_no_performance_leakage": len(perf_leakage) == 0,
-            "valid_no_performer_leakage": len(performer_leakage) == 0,
+            "valid_no_performance_leakage": performance_isolation_status == "verified",
+            "valid_no_performer_leakage": performer_isolation_status == "verified",
             "recording_isolation_status": recording_isolation_status,
             "is_performer_isolation_verified": performer_isolation_status == "verified",
             "is_performance_isolation_verified": performance_isolation_status == "verified",

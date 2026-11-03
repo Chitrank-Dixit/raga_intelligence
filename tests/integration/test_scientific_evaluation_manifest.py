@@ -12,6 +12,9 @@ from run_scientific_evaluation import (
     evaluation_mode_banner,
     format_leakage_audit,
 )
+import run_scientific_evaluation as scientific_evaluation
+from raga_intelligence.datasets.manifest import DatasetItem, DatasetManifest
+from raga_intelligence.datasets.partitioning import InfeasiblePartitionError
 from raga_intelligence.features.cache import compute_manifest_content_fingerprint
 
 
@@ -70,3 +73,42 @@ def test_report_audit_does_not_claim_unverified_performer_isolation():
 def test_dirty_development_report_is_marked_non_canonical():
     assert "NON-CANONICAL DEVELOPMENT RUN" in evaluation_mode_banner(False)
     assert evaluation_mode_banner(True) == ""
+
+
+def test_infeasible_partition_is_rejected_before_evaluation_cache_or_models(
+    tmp_path, monkeypatch
+):
+    manifest = DatasetManifest(items=[
+        DatasetItem(
+            recording_id="only_performance",
+            source="Test",
+            file_path="unread_audio.wav",
+            raga="Bhairav",
+            performer=None,
+            performance_id="single_performance",
+            duration_sec=10.0,
+            sample_rate=24000,
+            split="train",
+        )
+    ])
+    monkeypatch.setattr(
+        scientific_evaluation,
+        "assert_clean_source_tree",
+        lambda **kwargs: ("a" * 40, True),
+    )
+    monkeypatch.setattr(
+        scientific_evaluation, "build_evaluation_manifest", lambda dataset_dir: manifest
+    )
+    monkeypatch.setattr(
+        scientific_evaluation.np,
+        "load",
+        lambda *args, **kwargs: pytest.fail("infeasible partition reached cache loading"),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["run_scientific_evaluation.py", "--dataset-dir", str(tmp_path)],
+    )
+
+    with pytest.raises(InfeasiblePartitionError, match="requires every canonical raga"):
+        scientific_evaluation.main()

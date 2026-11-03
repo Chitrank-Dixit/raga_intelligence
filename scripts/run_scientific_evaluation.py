@@ -19,7 +19,11 @@ import torch
 
 from raga_intelligence.config import CANONICAL_RAGAS, RAGA_LIST, settings
 from raga_intelligence.datasets.hindustani_dataset import HindustaniDatasetAdapter
-from raga_intelligence.datasets.partitioning import GroupAwarePartitioner
+from raga_intelligence.datasets.partitioning import (
+    GroupAwarePartitioner,
+    GroupingDiagnostic,
+    InfeasiblePartitionError,
+)
 from raga_intelligence.evaluation.ablation import FeatureAblationStudy
 from raga_intelligence.evaluation.benchmark import AggregatedModelStats, ModelBenchmarkRunner
 from raga_intelligence.evaluation.error_analysis import (
@@ -59,6 +63,46 @@ def format_leakage_audit(audit: dict) -> list[str]:
         f"  - Performance Isolation: `{audit['performance_isolation_status']}`",
         f"  - Performer Isolation: `{audit['performer_isolation_status']}`",
     ]
+
+
+def validate_scientific_partition(manifest) -> tuple[GroupingDiagnostic, dict]:
+    """Reject infeasible grouping or missing canonical classes before loading caches/models."""
+    diagnostic = GroupAwarePartitioner.audit_grouping(manifest, group_col="performance_id")
+    if not diagnostic.is_fully_partitionable:
+        raise InfeasiblePartitionError(
+            "Scientific evaluation requires every canonical raga to be representable in "
+            f"disjoint performance groups. Audit limitations: {diagnostic.limitations}"
+        )
+
+    class_counts = manifest.get_class_counts()
+    missing_by_split = {
+        split: [
+            raga
+            for raga in RAGA_LIST
+            if class_counts.get(raga, {}).get(split, 0) == 0
+        ]
+        for split in ("train", "test")
+    }
+    missing_by_split = {split: ragas for split, ragas in missing_by_split.items() if ragas}
+    if missing_by_split:
+        raise InfeasiblePartitionError(
+            "Scientific evaluation requires every canonical raga in both train and test "
+            f"splits; missing coverage: {missing_by_split}"
+        )
+
+    split_audit = manifest.validate_splits()
+    failed_levels = [
+        level
+        for level, status in (
+            ("recording", split_audit["recording_isolation_status"]),
+            ("performance", split_audit["performance_isolation_status"]),
+            ("performer", split_audit["performer_isolation_status"]),
+        )
+        if status == "failed"
+    ]
+    if failed_levels:
+        raise ValueError(f"Scientific evaluation rejected split leakage at: {', '.join(failed_levels)}")
+    return diagnostic, split_audit
 
 
 def evaluation_mode_banner(canonical: bool) -> str:
@@ -108,19 +152,7 @@ def main():
 
     logger.info(f"Loaded manifest with {len(manifest.items)} total clips across {len(set(it.raga for it in manifest.items))} ragas.")
 
-    diagnostic = GroupAwarePartitioner.audit_grouping(manifest, group_col="performance_id")
-    split_audit = manifest.validate_splits()
-    failed_levels = [
-        level
-        for level, status in (
-            ("recording", split_audit["recording_isolation_status"]),
-            ("performance", split_audit["performance_isolation_status"]),
-            ("performer", split_audit["performer_isolation_status"]),
-        )
-        if status == "failed"
-    ]
-    if failed_levels:
-        raise ValueError(f"Scientific evaluation rejected split leakage at: {', '.join(failed_levels)}")
+    diagnostic, split_audit = validate_scientific_partition(manifest)
     logger.info(f"Total performances: {diagnostic.total_groups}. Fully partitionable: {diagnostic.is_fully_partitionable}")
     if diagnostic.limitations:
         for lim in diagnostic.limitations:

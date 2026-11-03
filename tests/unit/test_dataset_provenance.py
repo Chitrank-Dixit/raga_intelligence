@@ -180,6 +180,8 @@ def test_incomplete_performer_metadata_diagnostics():
     assert validation["performer_isolation_status"] == "not_verifiable"
     assert validation["performance_isolation_status"] == "not_verifiable"
     assert validation["recording_isolation_status"] == "verified"
+    assert validation["valid_no_performer_leakage"] is False
+    assert validation["valid_no_performance_leakage"] is False
 
     diag = GroupAwarePartitioner.audit_grouping(manifest, group_col="performer")
     assert diag.unknown_group_items_count == 1
