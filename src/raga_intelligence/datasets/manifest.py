@@ -161,12 +161,14 @@ class DatasetManifest(BaseModel):
             if it.audio_sha256 and not force_recompute:
                 continue
             p = Path(it.file_path)
-            if p.exists():
+            try:
                 h = hashlib.sha256()
                 with open(p, "rb") as f:
                     while chunk := f.read(65536):
                         h.update(chunk)
                 it.audio_sha256 = h.hexdigest()
+            except OSError as exc:
+                raise OSError(f"Could not compute audio SHA-256 for {p}: {exc}") from exc
 
     def compute_audio_content_fingerprint(
         self,

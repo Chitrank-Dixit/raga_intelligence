@@ -163,7 +163,7 @@ def test_capacity_limiter_503_backpressure(client: TestClient):
         assert inference_limiter.try_acquire() is True
         assert inference_limiter.active_count == 1
 
-        # Second request must be rejected with 503 and Retry-After: 5
+        # Upload is accepted and validated before the saturated inference slot rejects it.
         res = client.post("/analyze", files=files, data={"top_k": 2})
         assert res.status_code == 503
         assert res.headers.get("Retry-After") == "5"
@@ -180,6 +180,34 @@ def test_capacity_limiter_503_backpressure(client: TestClient):
     finally:
         inference_limiter.configure(max_concurrent=orig_max, retry_after_sec=orig_retry)
         inference_limiter.reset()
+
+
+def test_capacity_limiter_is_thread_safe():
+    """Concurrent acquisitions never exceed the configured inference capacity."""
+    import threading
+
+    orig_max = inference_limiter.max_concurrent
+    orig_retry = inference_limiter.retry_after_sec
+    inference_limiter.configure(max_concurrent=2)
+    inference_limiter.reset()
+    barrier = threading.Barrier(8)
+    acquired = []
+
+    def acquire():
+        barrier.wait()
+        acquired.append(inference_limiter.try_acquire())
+
+    try:
+        threads = [threading.Thread(target=acquire) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert sum(acquired) == 2
+        assert inference_limiter.active_count == 2
+    finally:
+        inference_limiter.reset()
+        inference_limiter.configure(max_concurrent=orig_max, retry_after_sec=orig_retry)
 
 
 def test_cleanup_on_decoder_failure(client: TestClient):

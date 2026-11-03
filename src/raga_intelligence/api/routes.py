@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import tempfile
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -37,30 +38,36 @@ pipeline: Optional[InferencePipeline] = None
 class InferenceCapacityLimiter:
     """
     Manages concurrent expensive audio inference load with immediate saturation
-    detection and predictable HTTP 503 backpressure.
+    detection and predictable HTTP 503 backpressure. This in-memory limiter is
+    process-local; deployments with multiple workers have one capacity pool per worker.
     """
     def __init__(self, max_concurrent: int = 4, retry_after_sec: int = 2):
         self.max_concurrent = max_concurrent
         self.retry_after_sec = retry_after_sec
         self.active_count = 0
+        self._lock = threading.Lock()
 
     def try_acquire(self) -> bool:
-        if self.active_count >= self.max_concurrent:
-            return False
-        self.active_count += 1
-        return True
+        with self._lock:
+            if self.active_count >= self.max_concurrent:
+                return False
+            self.active_count += 1
+            return True
 
     def release(self) -> None:
-        if self.active_count > 0:
-            self.active_count -= 1
+        with self._lock:
+            if self.active_count > 0:
+                self.active_count -= 1
 
     def configure(self, max_concurrent: int, retry_after_sec: Optional[int] = None) -> None:
-        self.max_concurrent = max_concurrent
-        if retry_after_sec is not None:
-            self.retry_after_sec = retry_after_sec
+        with self._lock:
+            self.max_concurrent = max_concurrent
+            if retry_after_sec is not None:
+                self.retry_after_sec = retry_after_sec
 
     def reset(self) -> None:
-        self.active_count = 0
+        with self._lock:
+            self.active_count = 0
 
 
 inference_limiter = InferenceCapacityLimiter(
@@ -186,19 +193,7 @@ async def analyze_audio_endpoint(
     tonic_hz: Optional[float] = Form(None, description="Optional known tonic (Sa) in Hz"),
     top_k: int = Form(5, ge=1, le=10, description="Number of candidate ragas to return"),
 ) -> AnalysisResponse:
-    # 1. Enforce concurrency limits and predictable backpressure
-    if not inference_limiter.try_acquire():
-        logger.warning(
-            f"Inference capacity saturated ({inference_limiter.active_count}/{inference_limiter.max_concurrent}). "
-            f"Rejecting request with HTTP 503 and Retry-After: {inference_limiter.retry_after_sec}."
-        )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Server inference capacity is currently saturated. Please retry shortly.",
-            headers={"Retry-After": str(inference_limiter.retry_after_sec)},
-        )
-
-    capacity_acquired = True
+    capacity_acquired = False
     temp_file: Optional[tempfile._TemporaryFileWrapper] = None
     temp_path: Optional[Path] = None
 
@@ -277,7 +272,20 @@ async def analyze_audio_endpoint(
                     detail="File content does not match a supported audio format.",
                 )
 
-        # 4. Execute inference using temp_path
+        # 4. Acquire capacity only after upload validation and immediately before inference.
+        if not inference_limiter.try_acquire():
+            logger.warning(
+                f"Inference capacity saturated ({inference_limiter.active_count}/{inference_limiter.max_concurrent}). "
+                f"Rejecting request with HTTP 503 and Retry-After: {inference_limiter.retry_after_sec}."
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Server inference capacity is currently saturated. Please retry shortly.",
+                headers={"Retry-After": str(inference_limiter.retry_after_sec)},
+            )
+        capacity_acquired = True
+
+        # Execute inference using temp_path
         pipe = get_pipeline()
         try:
             result = pipe.analyze_audio(

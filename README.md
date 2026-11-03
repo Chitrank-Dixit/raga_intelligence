@@ -114,19 +114,17 @@ The initial research cohort covers 10 representative Hindustani ragas across div
 
 ## 8. Empirical Benchmark Results
 
-Evaluated across 30 held-out unseen performances (3 per raga) with verified zero recording or artist cross-split leakage:
+The latest scientific report is [scientific_evaluation_report.md](reports/scientific_evaluation_report.md). It uses seeds `42, 123, 999`, 390 clips (360 train / 30 test), and MERT revision `12af15fef9d0ac838c3f475bfbbf26d2060dd4f5`. Dataset fingerprint: `f50e4843589290dfe26ad2d4a40574d4664c948aba465a3167a2f156bbc33308` (includes each audio SHA-256). Code commit: `1d50952a75c3fb4665ae63acc2587e8071552106`; working-tree fingerprint: `20b4f51e28c142163b0e2b3d83c27a64786823db2f8071b2bb66eb88e9d5a867`. The working tree was dirty because this evaluation ran before commit. Evaluation split fingerprint: `b5ba9f621f933b29b76fe0909fa99fa37ced8cc10626d8c2f0a169c91f54f171`.
 
-| Architecture | Input Representations | Macro-F1 | Accuracy | Calibration (ECE) | Checkpoint Path |
-| :--- | :--- | :---: | :---: | :---: | :--- |
-| **Frozen MERT Head** | 1536-dim Audio Embeddings | 0.3440 | 0.4000 | 0.1794 | `artifacts/checkpoints/mert_frozen_hindustani_model.pt` |
-| **Baseline Estimator (SVM)** | 35-dim Pitch Class & Chroma | 0.6067 | 0.6000 | 0.2003 | `artifacts/checkpoints/baseline_svm.joblib` |
-| **Hybrid Late Fusion** | 35-dim Pitch + 1536-dim MERT | **0.7400** | **0.7667** | **0.1808** | `artifacts/checkpoints/hybrid_hindustani_model.pt` |
+Latest multi-seed report metrics:
 
-### Key Musicological & ML Findings
-1. **Domain Baseline vs. Raw Embeddings**: Pretrained audio embeddings alone (`0.3440` F1) beat random chance (`0.1000`) by 3.5x, but significantly trail explicit tonic-relative pitch class distributions (`0.6067` F1) due to the absence of tonic ($S_a$) normalization in general acoustic models.
-2. **Late-Fusion Synergy**: Combining explicit swara distributions with deep acoustic representations yields **0.7400 Macro-F1**, achieving an absolute **+13.3% gain** over the baseline and **+39.6% gain** over MERT alone.
-3. **Musicological Symmetry**: In the baseline, confusion occurs primarily between *Bhoopali* and *Deshkar* (identical Audav scale `S R G P D`, differing in vadi emphasis and phrasing). In the hybrid model, multimodal features successfully separate these ragas.
+| Architecture | Model configuration | Macro-F1 (mean ± seed std) | Accuracy (mean ± seed std) | Evaluation split | Experiment records |
+| :--- | :--- | :---: | :---: | :--- | :--- |
+| Handcrafted SVM | 35 handcrafted features; RBF, C=10 | 0.4086 ± 0.0000 | 0.4333 ± 0.0000 | 30 held-out clips; 10 performance groups | `baseline_svm_20261103_155800_*.json` |
+| Frozen MERT | MERT-v1-95M, 1536 dims; 25 epochs | 0.2671 ± 0.0328 | 0.3667 ± 0.0272 | 30 held-out clips; 10 performance groups | `frozen_mert_head_20261103_155812_*.json` |
+| Hybrid late fusion | 35 handcrafted + 1536 MERT; 25 epochs | 0.4902 ± 0.0469 | 0.4889 ± 0.0567 | 30 held-out clips; 10 performance groups | `hybrid_late_fusion_20261103_155818_*.json` |
 
+These values replace the older one-off checkpoint metrics; those runs used different configurations and lack matching provenance, so they are not directly comparable.
 ---
 
 ## 9. Cross-Genre Melodic Similarity & Calibrated Abstention

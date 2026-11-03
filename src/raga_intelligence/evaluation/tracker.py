@@ -40,7 +40,31 @@ def get_git_commit_hash() -> str:
             return res.stdout.strip()
     except Exception:
         pass
-    return "unknown_or_uncommitted"
+    raise RuntimeError("Could not determine an exact Git commit SHA for this experiment")
+
+
+def get_working_tree_fingerprint() -> tuple[bool, str]:
+    """Fingerprint the uncommitted source tree alongside its base commit SHA."""
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=3,
+        check=True,
+    ).stdout
+    digest = hashlib.sha256()
+    for line in sorted(status.splitlines()):
+        path = line[3:]
+        if not path.startswith(("scripts/", "src/", "tests/")) and path not in {
+            "pyproject.toml", "uv.lock", "Containerfile", "compose.yaml"
+        }:
+            continue
+        digest.update(line.encode("utf-8", errors="replace"))
+        candidate = Path(path)
+        if candidate.is_file():
+            digest.update(candidate.read_bytes())
+    return bool(status.strip()), digest.hexdigest()
 
 
 def get_lockfile_hash() -> str:
@@ -107,11 +131,14 @@ class ExperimentRecord:
     dataset_fingerprint: str = ""
     dataset_version: str = "1.0.0"
     recording_ids_per_split: Dict[str, List[str]] = field(default_factory=dict)
+    evaluation_split_fingerprint: str = ""
     cache_fingerprints: Dict[str, Any] = field(default_factory=dict)
     feature_schema_version: str = "1.0.0"
     mert_model_revision: str = "12af15fef9d0ac838c3f475bfbbf26d2060dd4f5"
     lockfile_hash: str = ""
     notes: Optional[str] = None
+    working_tree_dirty: bool = False
+    working_tree_fingerprint: str = ""
 
 
 class ExperimentTracker:
@@ -137,6 +164,7 @@ class ExperimentTracker:
         dataset_fingerprint: Optional[str] = None,
         dataset_version: str = "1.0.0",
         recording_ids_per_split: Optional[Dict[str, List[str]]] = None,
+        evaluation_split_fingerprint: Optional[str] = None,
         cache_fingerprints: Optional[Dict[str, Any]] = None,
         feature_schema_version: Optional[str] = None,
         mert_model_revision: Optional[str] = None,
@@ -152,6 +180,7 @@ class ExperimentTracker:
 
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
         code_version = get_git_commit_hash()
+        working_tree_dirty, working_tree_fingerprint = get_working_tree_fingerprint()
         env_meta = get_environment_metadata()
         lock_hash = get_lockfile_hash()
 
@@ -160,6 +189,8 @@ class ExperimentTracker:
             experiment_name=experiment_name,
             timestamp=timestamp,
             code_version=code_version,
+            working_tree_dirty=working_tree_dirty,
+            working_tree_fingerprint=working_tree_fingerprint,
             seed=seed,
             model_name=model_name,
             model_architecture=model_architecture,
@@ -172,6 +203,7 @@ class ExperimentTracker:
             dataset_fingerprint=dataset_fingerprint or "",
             dataset_version=dataset_version,
             recording_ids_per_split=recording_ids_per_split or {},
+            evaluation_split_fingerprint=evaluation_split_fingerprint or "",
             cache_fingerprints=cache_fingerprints or {},
             feature_schema_version=feature_schema_version or FeatureSchema.SCHEMA_VERSION,
             mert_model_revision=mert_model_revision or settings.model.mert_model_revision,

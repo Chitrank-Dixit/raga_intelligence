@@ -66,6 +66,8 @@ class HindustaniDatasetAdapter(BaseDatasetAdapter):
             full_audio_path = self.dataset_dir / rel_path
 
             if not full_audio_path.exists():
+                if compute_audio_hashes:
+                    raise FileNotFoundError(f"Audio recording referenced by metadata is missing: {full_audio_path}")
                 logger.warning(f"Audio file not found: {full_audio_path}")
                 continue
 
@@ -89,7 +91,9 @@ class HindustaniDatasetAdapter(BaseDatasetAdapter):
                             h.update(chunk)
                     audio_sha = h.hexdigest()
                 except Exception as e:
-                    logger.warning(f"Could not hash audio content for {full_audio_path}: {e}")
+                    raise OSError(f"Could not hash audio content for {full_audio_path}: {e}") from e
+                if len(audio_sha) != 64:
+                    raise ValueError(f"Invalid SHA-256 for audio recording {full_audio_path}")
 
             item = DatasetItem(
                 recording_id=full_audio_path.stem,

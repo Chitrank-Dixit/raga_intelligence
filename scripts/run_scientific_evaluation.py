@@ -7,6 +7,7 @@ feature ablation studies, automated error analysis, and experiment tracking.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -35,6 +36,17 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
+def build_evaluation_manifest(dataset_dir: str | Path):
+    """Build the manifest using the content-hash policy required by evaluation caches."""
+    manifest = HindustaniDatasetAdapter(dataset_dir=dataset_dir).build_manifest(
+        compute_audio_hashes=True
+    )
+    missing = [item.file_path for item in manifest.items if not item.audio_sha256]
+    if missing:
+        raise ValueError(f"Missing audio SHA-256 for {len(missing)} recording(s): {missing[:5]}")
+    return manifest
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run Phase 2.1 Scientific Evaluation Framework.")
     parser.add_argument("--dataset-dir", type=str, default="./data/hindustani_dataset", help="Dataset directory")
@@ -53,8 +65,7 @@ def main():
     # 1. Dataset Manifest & Grouping Audit (Task 1)
     # =========================================================================
     logger.info("=== Task 1: Dataset Partitioning & Grouping Audit ===")
-    adapter = HindustaniDatasetAdapter(dataset_dir=args.dataset_dir)
-    manifest = adapter.build_manifest()
+    manifest = build_evaluation_manifest(args.dataset_dir)
     if len(manifest.items) == 0:
         logger.error(f"Failed to load dataset items from {args.dataset_dir}.")
         return
@@ -124,6 +135,13 @@ def main():
             "train": val_report.recording_ids_train,
             "test": val_report.recording_ids_test,
         },
+        "evaluation_split_fingerprint": hashlib.sha256(
+            json.dumps(
+                {"train": val_report.recording_ids_train, "test": val_report.recording_ids_test},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest(),
         "cache_fingerprints": {
             "features_cache_path": str(Path(args.features_cache).resolve()),
             "features_cache_sha256": feat_cache_sha256,
@@ -321,6 +339,27 @@ def main():
         recording_ids_test=val_report.recording_ids_test,
         dataset_fingerprint=val_report.dataset_fingerprint,
     )
+    ablation_path = Path(args.ablation_json)
+    with open(ablation_path, "r", encoding="utf-8") as ablation_file:
+        ablation_artifact = json.load(ablation_file)
+    latest_run = tracker.list_runs()[-1]
+    ablation_artifact.update(
+        {
+            "code_version": latest_run.code_version,
+            "working_tree_dirty": latest_run.working_tree_dirty,
+            "working_tree_fingerprint": latest_run.working_tree_fingerprint,
+            "evaluation_split_fingerprint": common_provenance[
+                "evaluation_split_fingerprint"
+            ],
+            "model_configuration": {
+                "classifier": "LogisticRegression(max_iter=1000)",
+                "mert_model_revision": settings.model.mert_model_revision,
+                "random_seed": primary_seed,
+            },
+        }
+    )
+    with open(ablation_path, "w", encoding="utf-8") as ablation_file:
+        json.dump(ablation_artifact, ablation_file, indent=2)
     logger.info(f"Feature ablation study completed and persisted to {args.ablation_json}")
 
     # =========================================================================
@@ -362,6 +401,12 @@ def main():
         f"**Execution Device**: `{device}`",
         f"**Seeds Evaluated**: `{args.seeds}`",
         f"**Primary Seed**: `{primary_seed}`",
+        f"**Dataset Fingerprint (audio SHA-256 included)**: `{val_report.dataset_fingerprint}`",
+        f"**Code Revision (Git commit)**: `{tracker.list_runs()[-1].code_version if tracker.list_runs() else 'not yet recorded'}`",
+        f"**Working Tree Dirty**: `{tracker.list_runs()[-1].working_tree_dirty if tracker.list_runs() else 'unknown'}`",
+        f"**Working Tree Fingerprint**: `{tracker.list_runs()[-1].working_tree_fingerprint if tracker.list_runs() else 'unknown'}`",
+        f"**Evaluation Split Fingerprint**: `{common_provenance['evaluation_split_fingerprint']}`",
+        f"**MERT Model Revision**: `{settings.model.mert_model_revision}`",
         "",
         "## 1. Executive Summary & Core Findings",
         "This report provides an empirical, statistically grounded benchmark of Indian classical raga recognition "

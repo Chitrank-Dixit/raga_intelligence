@@ -38,6 +38,9 @@ def extract_features_from_manifest(
     Extracts explicit musical features (35-dim baseline, or 75-dim with melodic features)
     across train, val, and test splits with strict cryptographic cache fingerprinting.
     """
+    manifest.populate_audio_hashes(force_recompute=True)
+    if any(not item.audio_sha256 for item in manifest.items):
+        raise ValueError("Every recording must have an audio SHA-256 before cache generation")
     manifest_hash = compute_manifest_content_fingerprint(manifest.items)
     config = FeatureConfig(include_melodic_features=include_melodic_features)
 
@@ -158,6 +161,9 @@ def extract_mert_embeddings_from_manifest(
     effective_model_revision = model_revision or settings.model.mert_model_revision
 
     # 1. Compute stable manifest and configuration fingerprint
+    manifest.populate_audio_hashes(force_recompute=True)
+    if any(not item.audio_sha256 for item in manifest.items):
+        raise ValueError("Every recording must have an audio SHA-256 before cache generation")
     manifest_hash = compute_manifest_content_fingerprint(manifest.items)
 
     expected_meta = {
