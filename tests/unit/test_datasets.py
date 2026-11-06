@@ -77,6 +77,9 @@ def test_synthetic_dataset_adapter(tmp_path: Path):
 
     validation = manifest.validate_splits()
     assert validation["valid_no_recording_leakage"] is True
+    assert all(item.license == "CC0-1.0" for item in manifest.items)
+    assert all(item.rights_status == "verified" for item in manifest.items)
+    assert all(item.performer_id for item in manifest.items)
 
 
 def test_hindustani_video_id_is_not_performer_identity(tmp_path: Path):
@@ -88,7 +91,9 @@ def test_hindustani_video_id_is_not_performer_identity(tmp_path: Path):
     manifest = HindustaniDatasetAdapter(dataset_dir=tmp_path).build_manifest()
     item = manifest.items[0]
     assert item.performance_id == "video123"
+    assert item.performance_identity_source == "filename_pattern"
     assert item.performer is None
+    assert item.performer_id is None
     assert manifest.validate_splits()["performer_isolation_status"] == "not_verifiable"
 
 
@@ -101,6 +106,7 @@ def test_hindustani_artist_metadata_is_kept_separate_from_video_id(tmp_path: Pat
     )
     item = HindustaniDatasetAdapter(dataset_dir=tmp_path).build_manifest().items[0]
     assert item.performer == "Artist Name"
+    assert item.performer_id is None
     assert item.performance_id == "video123"
 
 
@@ -113,6 +119,7 @@ def test_manifest_performer_and_performance_leakage_detection():
             file_path="dummy1.wav",
             raga="Bhairav",
             performer="Ustad A",
+            performer_id="artist-a",
             performance_id="perf_01",
             duration_sec=10.0,
             sample_rate=24000,
@@ -126,6 +133,7 @@ def test_manifest_performer_and_performance_leakage_detection():
             file_path="dummy2.wav",
             raga="Yaman",
             performer="Pandit B",
+            performer_id="artist-b",
             performance_id="perf_02",
             duration_sec=10.0,
             sample_rate=24000,
@@ -149,6 +157,7 @@ def test_manifest_performer_and_performance_leakage_detection():
             file_path="dummy3.wav",
             raga="Bhairav",
             performer="Ustad A",
+            performer_id="artist-a",
             performance_id="perf_03",
             duration_sec=10.0,
             sample_rate=24000,
@@ -158,7 +167,7 @@ def test_manifest_performer_and_performance_leakage_detection():
     val2 = manifest.validate_splits()
     assert val2["valid_no_performer_leakage"] is False
     assert val2["performer_isolation_status"] == "failed"
-    assert "Ustad A" in val2["leaked_performers"]
+    assert "artist-a" in val2["leaked_performers"]
 
     # Deliberate performance leakage: perf_01 in test split with new performer
     manifest2 = DatasetManifest()
@@ -225,6 +234,7 @@ def test_split_summary_and_class_distribution():
             file_path="dummy1.wav",
             raga="Bhairav",
             performer="Artist 1",
+            performer_id="artist-1",
             performance_id="p1",
             duration_sec=5.0,
             sample_rate=24000,
@@ -238,6 +248,7 @@ def test_split_summary_and_class_distribution():
             file_path="dummy2.wav",
             raga="Bhairav",
             performer="Artist 2",
+            performer_id="artist-2",
             performance_id="p2",
             duration_sec=5.0,
             sample_rate=24000,
@@ -251,6 +262,7 @@ def test_split_summary_and_class_distribution():
             file_path="dummy3.wav",
             raga="Yaman",
             performer="Artist 3",
+            performer_id="artist-3",
             performance_id="p3",
             duration_sec=5.0,
             sample_rate=24000,
@@ -288,6 +300,7 @@ def test_saraga_deterministic_group_partition():
                     file_path=f"path_{idx}_{track_num}.wav",
                     raga=ragas[(idx + track_num) % len(ragas)],
                     performer=performer,
+                    performer_id=f"artist-{idx}",
                     performance_id=f"perf_{idx}",
                     duration_sec=10.0,
                     sample_rate=24000,
@@ -320,6 +333,7 @@ def test_training_fails_on_leakage():
             file_path="dummy1.wav",
             raga="Bhairav",
             performer="Shared Performer",
+            performer_id="shared-performer",
             duration_sec=10.0,
             sample_rate=24000,
             split="train",
@@ -332,6 +346,7 @@ def test_training_fails_on_leakage():
             file_path="dummy2.wav",
             raga="Bhairav",
             performer="Shared Performer",
+            performer_id="shared-performer",
             duration_sec=10.0,
             sample_rate=24000,
             split="test",

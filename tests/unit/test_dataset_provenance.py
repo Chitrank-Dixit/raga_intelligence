@@ -478,6 +478,7 @@ def test_global_split_consistency_across_seeds():
                 file_path=f"/dummy/{p_name}_{r_name}.wav",
                 raga=r_name,
                 performer=p_name,
+                performer_id=f"performer-{p_idx}",
                 performance_id=p_name,
                 duration_sec=10.0,
                 sample_rate=24000,

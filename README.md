@@ -105,6 +105,11 @@ The initial research cohort covers 10 representative Hindustani ragas across div
 
 ## 7. Research Datasets & Licensing
 
+Dataset record fields and provenance semantics are defined in
+[`docs/dataset_metadata_contract.md`](docs/dataset_metadata_contract.md). The
+read-only dataset quality audit is documented in
+[`docs/dataset_audit.md`](docs/dataset_audit.md).
+
 - **Hindustani Raag Corpus**: 390 authentic recordings across 10 canonical ragas (`neerajaabhyankar/hindustani-raag-small`) with ground-truth hand-annotated Sa tonic (Hz). Partitioned with 0% recording leakage (360 train, 30 held-out test).
 - **Saraga Hindustani**: Zenodo DOI `10.5281/zenodo.4301737` (CC BY-NC-SA 4.0).
 - **CompMusic IAM Features**: Zenodo DOI `10.5281/zenodo.7278505` (CC BY-NC-ND 4.0).

@@ -206,13 +206,13 @@ class SaragaHindustaniAdapter(BaseDatasetAdapter):
                     except ValueError:
                         tonic_hz = None
 
-                artist = "Unknown"
+                artist: Optional[str] = None
                 if "lead_artist" in data:
                     la = data["lead_artist"]
-                    artist = la.get("name", "Unknown") if isinstance(la, dict) else str(la)
+                    artist = la.get("name") if isinstance(la, dict) else str(la)
                 elif "artist" in data:
                     art = data["artist"]
-                    artist = art.get("name", "Unknown") if isinstance(art, dict) else str(art)
+                    artist = art.get("name") if isinstance(art, dict) else str(art)
                 elif "artists" in data and isinstance(data["artists"], list) and len(data["artists"]) > 0:
                     for a in data["artists"]:
                         if isinstance(a, dict) and (a.get("role") == "lead" or "name" in a):
@@ -228,6 +228,7 @@ class SaragaHindustaniAdapter(BaseDatasetAdapter):
                     if val:
                         perf_id = val.get("title") or val.get("name") or val.get("id") if isinstance(val, dict) else str(val)
                         break
+                performance_identity_source = "metadata" if perf_id else "unknown"
                 if not perf_id:
                     perf_id = rec_id
 
@@ -237,14 +238,25 @@ class SaragaHindustaniAdapter(BaseDatasetAdapter):
                         source="SaragaHindustani",
                         file_path=str(audio_path),
                         raga=canonical_name,
+                        raw_raga_label=raw_raga,
                         tradition="Hindustani",
-                        performer=artist,
+                        performer=(
+                            artist
+                            if artist and artist.strip().lower() not in {"unknown", "none", "null"}
+                            else None
+                        ),
                         performance_id=perf_id,
+                        performance_identity_source=performance_identity_source,
+                        source_recording_id=rec_id,
                         duration_sec=float(data.get("duration", 0.0)),
                         sample_rate=int(data.get("sample_rate", 44100)),
                         tonic_hz=tonic_hz,
                         split="train",  # placeholder, partitioned below
                         license="CC BY-NC-SA 4.0",
+                        source_url="https://doi.org/10.5281/zenodo.4301737",
+                        license_url="https://creativecommons.org/licenses/by-nc-sa/4.0/",
+                        attribution="Music Technology Group, Universitat Pompeu Fabra",
+                        rights_status="verified",
                         metadata={"tala": str(data.get("taal", "Unknown"))},
                     )
                 )

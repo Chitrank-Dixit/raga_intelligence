@@ -20,8 +20,9 @@ from raga_intelligence.datasets.hindustani_dataset import CANONICAL_NAME_MAP
 
 IDENTITY_UNKNOWN = {"", "unknown", "none", "null"}
 PERFORMANCE_COLUMNS = ("performance_id", "performance", "source_id", "video_id")
-PERFORMER_COLUMNS = ("performer", "artist")
-SOURCE_COLUMNS = ("source", "dataset_source", "collection")
+PERFORMER_COLUMNS = ("performer_id", "artist_id")
+PERFORMER_DISPLAY_COLUMNS = ("performer", "artist", "lead_artist")
+SOURCE_COLUMNS = ("source", "dataset_source", "source_collection", "collection")
 SOURCE_URL_COLUMNS = ("source_url", "url", "origin_url")
 LICENSE_COLUMNS = ("license", "licence", "rights")
 ATTRIBUTION_COLUMNS = ("attribution", "credit", "citation")
@@ -49,6 +50,21 @@ def _first_value(row: dict[str, Any], columns: tuple[str, ...]) -> str | None:
             value = _identity(normalized[column])
             if value is not None:
                 return value
+    return None
+
+
+def _first_controlled_value(row: dict[str, Any], columns: tuple[str, ...]) -> str | None:
+    """Read status fields without collapsing literal `unknown` into a missing value."""
+    normalized = {key.strip().lower(): value for key, value in row.items()}
+    for column in columns:
+        if column not in normalized:
+            continue
+        value = normalized[column]
+        if value is None or pd.isna(value):
+            continue
+        text = str(value).strip()
+        if text:
+            return text
     return None
 
 
@@ -255,6 +271,7 @@ def audit_dataset(
                 performance_id = _identity(match.group(1))
                 performance_origin = "filename_pattern"
         performer_id = _first_value(row, PERFORMER_COLUMNS)
+        performer_display_name = _first_value(row, PERFORMER_DISPLAY_COLUMNS)
         label = _identity(row.get("label") or row.get("raga"))
         canonical_raga = _canonical_raga(label)
         source = _safe_source_reference(_first_value(row, SOURCE_COLUMNS))
@@ -324,7 +341,12 @@ def audit_dataset(
             recording_to_ids[audio["audio_sha256"]].append(recording_id)
 
         license_value = _first_value(row, LICENSE_COLUMNS)
-        rights_value = _first_value(row, ("rights_status", "rights", "license_status"))
+        rights_value = _first_controlled_value(row, ("rights_status", "license_status"))
+        performance_identity_source = _first_controlled_value(
+            row, ("performance_identity_source",)
+        )
+        if performance_identity_source is None:
+            performance_identity_source = performance_origin
         detail = {
             "metadata_row": index,
             "recording_id": recording_id,
@@ -337,22 +359,30 @@ def audit_dataset(
             "split": split,
             "split_identity_source": split_origin,
             "performance_id": performance_id,
-            "performance_identity_source": performance_origin,
+            "performance_identity_source": performance_identity_source,
             "performer_id": performer_id,
+            "performer_display_name": performer_display_name,
             "audio": audio,
             "missing_metadata": missing_metadata,
             "invalid_metadata": invalid_metadata,
             "provenance": {
+                "source_recording_id": _first_value(row, ("source_recording_id",)),
                 "source_url": _safe_source_reference(_first_value(row, SOURCE_URL_COLUMNS)),
                 "license": _safe_source_reference(license_value),
+                "license_url": _safe_source_reference(_first_value(row, ("license_url",))),
                 "attribution": _safe_source_reference(_first_value(row, ATTRIBUTION_COLUMNS)),
                 "rights_status": _safe_source_reference(rights_value),
             },
             "annotation": {
                 "confidence": _first_value(row, CONFIDENCE_COLUMNS),
-                "review_status": _first_value(row, REVIEW_COLUMNS),
+                "review_status": _first_controlled_value(row, REVIEW_COLUMNS),
+                "status": _first_controlled_value(row, ("annotation_status",)),
+                "notes": _first_value(row, ("annotation_notes", "review_notes")),
             },
-            "record_lifecycle_status": _identity(row.get(acceptance_column)) if acceptance_column else None,
+            "record_lifecycle_status": (
+                _first_controlled_value(row, (acceptance_column,)) if acceptance_column else None
+            ),
+            "metadata_schema_version": _first_controlled_value(row, ("metadata_schema_version",)),
         }
         record_details.append(detail)
         raw_manifest_rows.append({key: value for key, value in detail.items() if key != "audio"})
@@ -415,6 +445,7 @@ def audit_dataset(
     source_completeness = _completeness(record_details, lambda rec: rec["source"])
     source_url_completeness = _completeness(record_details, lambda rec: rec["provenance"]["source_url"])
     license_completeness = _completeness(record_details, lambda rec: rec["provenance"]["license"])
+    license_evidence_completeness = _completeness(record_details, lambda rec: rec["provenance"]["license_url"])
     attribution_completeness = _completeness(record_details, lambda rec: rec["provenance"]["attribution"])
     rights_uncertain = [
         rec["recording_id"] for rec in record_details
@@ -543,6 +574,8 @@ def audit_dataset(
             "performer": {
                 "missing_count": issue_counts["missing_performer_id"],
                 "unique_performers": len(performer_to_rows),
+                "display_name_coverage": _completeness(record_details, lambda rec: rec["performer_display_name"]),
+                "performer_id_coverage": _completeness(record_details, lambda rec: rec["performer_id"]),
                 "recordings_per_performer": {key: len(value) for key, value in sorted(performer_to_rows.items())},
                 "performances_per_performer": _performances_per_performer(record_details),
                 "raga_coverage_per_performer": {key: sorted(value) for key, value in sorted(performer_ragas.items())},
@@ -570,13 +603,32 @@ def audit_dataset(
             # of the canonical evaluation label set.
             "metadata_completeness": _completeness(record_details, lambda rec: rec["raw_raga_label"]),
             "canonical_label_coverage": _completeness(record_details, lambda rec: rec["canonical_raga"]),
+            "annotation_status_distribution": _value_distribution(
+                record_details,
+                lambda rec: rec["annotation"]["status"] or rec["annotation"]["review_status"],
+            ),
             **annotations,
+        },
+        "schema_coverage": {
+            "metadata_schema_version_distribution": _value_distribution(
+                record_details, lambda rec: rec["metadata_schema_version"]
+            ),
+            "record_lifecycle_status_distribution": _value_distribution(
+                record_details, lambda rec: rec["record_lifecycle_status"]
+            ),
+            "performance_identity_source_distribution": _value_distribution(
+                record_details, lambda rec: rec["performance_identity_source"]
+            ),
         },
         "provenance": {
             "source_completeness": source_completeness,
             "source_url_completeness": source_url_completeness,
             "license_completeness": license_completeness,
+            "license_evidence_completeness": license_evidence_completeness,
             "attribution_completeness": attribution_completeness,
+            "rights_status_distribution": _value_distribution(
+                record_details, lambda rec: rec["provenance"]["rights_status"]
+            ),
             "rights_uncertain_recording_ids": rights_uncertain,
             "record_lifecycle_field": acceptance_column,
             "lifecycle_classification_available": acceptance_column is not None,
@@ -631,6 +683,18 @@ def _completeness(records: list[dict[str, Any]], get_value) -> dict[str, int | f
     return {"present": present, "missing": total - present, "total": total, "fraction": present / total if total else 0.0}
 
 
+def _value_distribution(records: list[dict[str, Any]], get_value) -> dict[str, int]:
+    def category(record: dict[str, Any]) -> str:
+        value = get_value(record)
+        if value is None or pd.isna(value):
+            return "<missing>"
+        normalized = str(value).strip()
+        return normalized or "<missing>"
+
+    values = Counter(category(record) for record in records)
+    return dict(sorted(values.items()))
+
+
 def _performances_per_performer(records: list[dict[str, Any]]) -> dict[str, int]:
     result: dict[str, set[str]] = defaultdict(set)
     for record in records:
@@ -645,6 +709,9 @@ def render_audit_markdown(audit: dict[str, Any]) -> str:
     """Render the stable audit structure as a human-readable Markdown report."""
     summary = audit["summary"]
     readiness = audit["evaluation_readiness"]
+    performer_id_coverage = audit["identity_coverage"]["performer"]["performer_id_coverage"]
+    label_completeness = audit["annotation_quality"]["metadata_completeness"]
+    canonical_label_coverage = audit["annotation_quality"]["canonical_label_coverage"]
     lines = [
         "# Dataset Quality Audit",
         "",
@@ -687,6 +754,7 @@ def render_audit_markdown(audit: dict[str, Any]) -> str:
         f"- Recording isolation: **{readiness['recording_isolation_status']}**",
         f"- Performance isolation: **{readiness['performance_isolation_status']}** (verifiable: {readiness['performance_isolation_verifiable']})",
         f"- Performer isolation: **{readiness['performer_isolation_status']}** (verifiable: {readiness['performer_isolation_verifiable']})",
+        f"- Performer ID coverage: {performer_id_coverage['present']}/{performer_id_coverage['total']}",
         f"- Performance identity sources: `{audit['identity_coverage']['performance']['identity_source_counts']}`",
         f"- Evaluation scope records / unavailable audio: {readiness['evaluation_scope_record_count']} / {readiness['unavailable_or_unreadable_audio_count']}",
         f"- Canonical records without split assignment: {readiness['missing_split_assignment_count']}",
@@ -696,8 +764,15 @@ def render_audit_markdown(audit: dict[str, Any]) -> str:
         "### Canonical raga coverage",
         "",
         _nested_table(audit["annotation_quality"]["class_distribution"], readiness["raga_class_coverage_by_split"]),
-        f"- Raga label metadata present: {audit['annotation_quality']['metadata_completeness']['present']}/{audit['annotation_quality']['metadata_completeness']['total']} ({audit['annotation_quality']['metadata_completeness']['fraction']:.1%})",
-        f"- Labels in canonical vocabulary: {audit['annotation_quality']['canonical_label_coverage']['present']}/{audit['annotation_quality']['canonical_label_coverage']['total']} ({audit['annotation_quality']['canonical_label_coverage']['fraction']:.1%})",
+        "",
+        "### Raw source raga labels",
+        "",
+        _markdown_table("Raw raga label", audit["records_per_raw_raga_label"]),
+        "",
+        f"- Raga label metadata present: {label_completeness['present']}/{label_completeness['total']} "
+        f"({label_completeness['fraction']:.1%})",
+        f"- Labels in canonical vocabulary: {canonical_label_coverage['present']}/"
+        f"{canonical_label_coverage['total']} ({canonical_label_coverage['fraction']:.1%})",
         f"- Missing annotation confidence: `{audit['annotation_quality']['missing_confidence_count']}`",
         f"- Missing review status: `{audit['annotation_quality']['missing_review_status_count']}`",
         f"- Missing tonic annotation: `{audit['annotation_quality']['missing_tonic_count']}`",
@@ -709,6 +784,15 @@ def render_audit_markdown(audit: dict[str, Any]) -> str:
     lines.extend(f"- **{issue['severity']} `{issue['code']}`:** {issue['message']}" for issue in audit["issues"])
     if not audit["issues"]:
         lines.append("- No issues detected.")
+    lines.extend(["", "## Metadata contract coverage", ""])
+    for name, distribution in audit["schema_coverage"].items():
+        lines.append(f"- {name.replace('_', ' ').title()}: `{distribution}`")
+    lines.append(
+        f"- Annotation status distribution: `{audit['annotation_quality']['annotation_status_distribution']}`"
+    )
+    lines.append(
+        f"- Rights status distribution: `{audit['provenance']['rights_status_distribution']}`"
+    )
     lines.extend(["", "## Provenance completeness", ""])
     for name, metrics in audit["provenance"].items():
         if isinstance(metrics, dict) and "fraction" in metrics:

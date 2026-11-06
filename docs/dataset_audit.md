@@ -15,8 +15,8 @@ configured canonical raga vocabulary. A filename-derived performance identity
 is used only when the CSV has no performance identity column and the existing
 adapter's bracketed ID convention matches; its origin is marked in JSON. A
 present but empty or unknown identity field remains unknown. Performer IDs are
-read only from performer/artist metadata and are never inferred from recording
-or performance IDs.
+read only from explicit `performer_id` or `artist_id` columns; display names are
+reported separately and never treated as performer identities.
 
 Missing referenced files, unreadable audio, duplicate recording IDs, invalid
 annotations, leakage, and incomplete canonical train/test coverage are errors
@@ -30,3 +30,10 @@ reported and can still make the CLI return nonzero.
 The metadata fingerprint covers normalized manifest facts and relative paths.
 The audio content fingerprint is a separate hash over relative paths and file
 SHA-256 values and is unavailable unless every referenced file can be hashed.
+
+The audit also reports schema-version, lifecycle, annotation, rights, and
+performance-identity-source distributions when those columns exist. Missing
+schema and lifecycle values remain visible as missing; auditing does not assign
+legacy/accepted or rights statuses to the CSV records. See
+[`dataset_metadata_contract.md`](dataset_metadata_contract.md) for the shared
+`DatasetItem` contract and the explicit metadata fingerprint v2 policy.

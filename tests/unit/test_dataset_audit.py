@@ -13,7 +13,7 @@ from scripts.audit_dataset import main
 
 
 CSV_FIELDS = [
-    "recording_id", "file_name", "label", "tonic_hz", "performance_id", "performer",
+    "recording_id", "file_name", "label", "tonic_hz", "performance_id", "performer", "performer_id",
     "source", "source_url", "license", "attribution", "split",
 ]
 
@@ -42,7 +42,7 @@ def valid_rows(root: Path) -> list[dict]:
             rows.append({
                 "recording_id": f"{raga}_{suffix}", "file_name": name, "label": raga,
                 "tonic_hz": "220", "performance_id": f"performance_{raga}_{suffix}",
-                "performer": f"artist_{raga}_{suffix}", "source": "fixture",
+                "performer": f"Artist {raga} {suffix}", "performer_id": f"artist_{raga}_{suffix}", "source": "fixture",
                 "source_url": "https://example.invalid/source", "license": "CC0-1.0",
                 "attribution": "Fixture author", "split": split,
             })
@@ -68,7 +68,7 @@ def test_noncanonical_missing_rows_do_not_expand_canonical_evaluation_scope(tmp_
     rows.append({
         "recording_id": "legacy_absent", "file_name": "Legacy/legacy_absent.mp3",
         "label": "Noncanonical Raga", "tonic_hz": "220", "performance_id": "legacy_perf",
-        "performer": "unknown", "source": "legacy", "source_url": "", "license": "",
+        "performer": "unknown", "performer_id": "unknown", "source": "legacy", "source_url": "", "license": "",
         "attribution": "", "split": "train",
     })
     write_manifest(tmp_path, rows)
@@ -84,15 +84,27 @@ def test_label_completeness_distinguishes_present_noncanonical_labels(tmp_path):
     rows = valid_rows(tmp_path)
     rows.extend([
         {
-            "recording_id": "noncanonical", "file_name": "noncanonical.wav",
-            "label": "Invented Raga", "tonic_hz": "220", "performance_id": "extra_perf",
-            "performer": "unknown", "source": "fixture", "source_url": "",
+            "recording_id": "noncanonical",
+            "file_name": "noncanonical.wav",
+            "label": "Invented Raga",
+            "tonic_hz": "220",
+            "performance_id": "extra_perf",
+            "performer": "unknown",
+            "performer_id": "unknown",
+            "source": "fixture",
+            "source_url": "",
             "license": "", "attribution": "", "split": "train",
         },
         {
-            "recording_id": "missing_label", "file_name": "missing_label.wav",
-            "label": "", "tonic_hz": "220", "performance_id": "missing_perf",
-            "performer": "unknown", "source": "fixture", "source_url": "",
+            "recording_id": "missing_label",
+            "file_name": "missing_label.wav",
+            "label": "",
+            "tonic_hz": "220",
+            "performance_id": "missing_perf",
+            "performer": "unknown",
+            "performer_id": "unknown",
+            "source": "fixture",
+            "source_url": "",
             "license": "", "attribution": "", "split": "train",
         },
     ])
@@ -197,6 +209,7 @@ def test_missing_performance_and_performer_identity_remain_unknown(tmp_path):
     for row in rows:
         row["performance_id"] = "unknown"
         row["performer"] = " "
+        row["performer_id"] = "unknown"
     write_manifest(tmp_path, rows)
 
     result = audit_dataset(tmp_path)
@@ -212,6 +225,7 @@ def test_filename_performance_rule_is_disclosed_and_never_populates_performer(tm
     for row in rows:
         row.pop("performance_id")
         row["performer"] = "unknown"
+        row["performer_id"] = "unknown"
     write_manifest(tmp_path, rows, [field for field in CSV_FIELDS if field != "performance_id"])
 
     result = audit_dataset(tmp_path)
@@ -235,13 +249,65 @@ def test_performance_leakage_across_splits_is_reported(tmp_path):
 
 def test_performer_leakage_across_splits_is_reported(tmp_path):
     rows = valid_rows(tmp_path)
-    rows[0]["performer"] = rows[1]["performer"]
+    rows[0]["performer_id"] = rows[1]["performer_id"]
     write_manifest(tmp_path, rows)
 
     result = audit_dataset(tmp_path)
 
     assert result["evaluation_readiness"]["performer_isolation_status"] == "failed"
     assert any(issue["code"] == "performer_leakage" for issue in result["issues"])
+
+
+def test_audit_reports_versioned_schema_and_uses_only_performer_ids(tmp_path):
+    rows = valid_rows(tmp_path)
+    for row in rows:
+        row["performer_id"] = "unknown"
+        row["metadata_schema_version"] = "1.1"
+        row["record_status"] = "accepted"
+        row["rights_status"] = "verified"
+        row["annotation_status"] = "reviewed"
+        row["performance_identity_source"] = "metadata"
+        row["license_url"] = "https://example.invalid/license"
+    fields = [
+        *CSV_FIELDS, "metadata_schema_version", "record_status", "rights_status",
+        "annotation_status", "performance_identity_source", "license_url",
+    ]
+    write_manifest(tmp_path, rows, fields)
+
+    result = audit_dataset(tmp_path)
+
+    assert result["schema_coverage"]["metadata_schema_version_distribution"] == {"1.1": 20}
+    assert result["schema_coverage"]["record_lifecycle_status_distribution"] == {"accepted": 20}
+    assert result["schema_coverage"]["performance_identity_source_distribution"] == {"metadata": 20}
+    assert result["annotation_quality"]["annotation_status_distribution"] == {"reviewed": 20}
+    assert result["provenance"]["rights_status_distribution"] == {"verified": 20}
+    assert result["provenance"]["license_evidence_completeness"]["present"] == 20
+    performer = result["identity_coverage"]["performer"]
+    assert performer["display_name_coverage"]["present"] == 20
+    assert performer["performer_id_coverage"]["present"] == 0
+    assert result["evaluation_readiness"]["performer_isolation_status"] == "not_verifiable"
+
+
+def test_audit_preserves_explicit_unknown_statuses_separately_from_missing(tmp_path):
+    rows = valid_rows(tmp_path)
+    for row in rows:
+        row["rights_status"] = "unknown"
+        row["performance_identity_source"] = "unknown"
+        row["record_status"] = "unknown"
+        row["annotation_status"] = "unknown"
+    rows[0]["rights_status"] = ""
+    fields = [
+        *CSV_FIELDS, "rights_status", "performance_identity_source", "record_status",
+        "annotation_status",
+    ]
+    write_manifest(tmp_path, rows, fields)
+
+    result = audit_dataset(tmp_path)
+
+    assert result["provenance"]["rights_status_distribution"] == {"<missing>": 1, "unknown": 19}
+    assert result["schema_coverage"]["performance_identity_source_distribution"] == {"unknown": 20}
+    assert result["schema_coverage"]["record_lifecycle_status_distribution"] == {"unknown": 20}
+    assert result["annotation_quality"]["annotation_status_distribution"] == {"unknown": 20}
 
 
 def test_missing_and_unknown_raga_labels_are_distinguished(tmp_path):
