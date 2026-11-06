@@ -80,6 +80,36 @@ def test_noncanonical_missing_rows_do_not_expand_canonical_evaluation_scope(tmp_
     assert result["dataset_has_critical_errors"] is True
 
 
+def test_label_completeness_distinguishes_present_noncanonical_labels(tmp_path):
+    rows = valid_rows(tmp_path)
+    rows.extend([
+        {
+            "recording_id": "noncanonical", "file_name": "noncanonical.wav",
+            "label": "Invented Raga", "tonic_hz": "220", "performance_id": "extra_perf",
+            "performer": "unknown", "source": "fixture", "source_url": "",
+            "license": "", "attribution": "", "split": "train",
+        },
+        {
+            "recording_id": "missing_label", "file_name": "missing_label.wav",
+            "label": "", "tonic_hz": "220", "performance_id": "missing_perf",
+            "performer": "unknown", "source": "fixture", "source_url": "",
+            "license": "", "attribution": "", "split": "train",
+        },
+    ])
+    write_audio(tmp_path / "noncanonical.wav")
+    write_audio(tmp_path / "missing_label.wav")
+    write_manifest(tmp_path, rows)
+
+    completeness = audit_dataset(tmp_path)["annotation_quality"]
+
+    assert completeness["metadata_completeness"] == {
+        "present": 21, "missing": 1, "total": 22, "fraction": 21 / 22,
+    }
+    assert completeness["canonical_label_coverage"] == {
+        "present": 20, "missing": 2, "total": 22, "fraction": 20 / 22,
+    }
+
+
 def test_missing_audio_file_is_reported_and_has_no_audio_fingerprint(tmp_path):
     rows = valid_rows(tmp_path)
     (tmp_path / rows[0]["file_name"]).unlink()
@@ -262,6 +292,31 @@ def test_incomplete_license_and_provenance_are_flagged(tmp_path):
     assert result["provenance"]["unclassified_lifecycle_record_count"] == 20
 
 
+def test_markdown_report_explains_unavailable_lifecycle_classification(tmp_path):
+    write_manifest(tmp_path, valid_rows(tmp_path))
+    result = audit_dataset(tmp_path)
+
+    report = render_audit_markdown(result)
+
+    assert "Record lifecycle classification: unavailable" in report
+    assert result["provenance"]["note"] in report
+
+
+def test_markdown_report_shows_lifecycle_counts_when_status_field_exists(tmp_path):
+    rows = valid_rows(tmp_path)
+    for row in rows:
+        row["record_status"] = "legacy"
+    rows[0]["record_status"] = "accepted"
+    write_manifest(tmp_path, rows, [*CSV_FIELDS, "record_status"])
+    result = audit_dataset(tmp_path)
+
+    report = render_audit_markdown(result)
+
+    assert "Legacy records: 19" in report
+    assert "Newly accepted records: 1" in report
+    assert "Records without a lifecycle status: 0" in report
+
+
 def test_local_paths_in_source_urls_are_redacted(tmp_path):
     rows = valid_rows(tmp_path)
     rows[0]["source"] = "/var/lib/private/source"
@@ -300,6 +355,8 @@ def test_report_schema_and_fingerprints_are_reproducible(tmp_path):
     assert first["schema_version"] == "1.0"
     report = render_audit_markdown(first)
     assert "Evaluation readiness" in report
+    assert "Raga label metadata present: 20/20 (100.0%)" in report
+    assert "Labels in canonical vocabulary: 20/20 (100.0%)" in report
     assert str(tmp_path) not in report
     assert json.loads(json.dumps(first))["summary"]["total_manifest_records"] == 20
 

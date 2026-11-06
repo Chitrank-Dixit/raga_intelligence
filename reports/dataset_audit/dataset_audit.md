@@ -1,7 +1,7 @@
 # Dataset Quality Audit
 
-- **Audit timestamp (UTC):** `2026-11-03T21:27:09.848950+00:00`
-- **Repository commit:** `d16e153a5a58e197efaf934c224f06f4ec34fd5b`
+- **Audit timestamp (UTC):** `2026-11-03T21:54:58.607658+00:00`
+- **Repository commit:** `76d60d96e97194a83657caae7250494ac03f4122`
 - **Relevant source tree clean:** `False`
 - **Dataset root identifier:** `hindustani_dataset`
 - **Manifest:** `metadata.csv`
@@ -72,6 +72,8 @@
 | Malkauns | 53 | 50 | 0 | 3 |
 | Todi | 33 | 30 | 0 | 3 |
 | Yaman | 38 | 35 | 0 | 3 |
+- Raga label metadata present: 1960/1960 (100.0%)
+- Labels in canonical vocabulary: 390/1960 (19.9%)
 - Missing annotation confidence: `None`
 - Missing review status: `None`
 - Missing tonic annotation: `0`
@@ -94,5 +96,7 @@
 - Source Url Completeness: 0/1960 (0.0%)
 - License Completeness: 0/1960 (0.0%)
 - Attribution Completeness: 0/1960 (0.0%)
+- Record lifecycle classification: unavailable (no lifecycle status field was present).
+- Access to a recording does not establish permission to use it; records were audited, not excluded. Lifecycle counts are unavailable when no status field exists.
 
 Audit is read-only; source records and audio files are not modified.

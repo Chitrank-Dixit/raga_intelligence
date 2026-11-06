@@ -1,5 +1,11 @@
 {
   "annotation_quality": {
+    "canonical_label_coverage": {
+      "fraction": 0.1989795918367347,
+      "missing": 1570,
+      "present": 390,
+      "total": 1960
+    },
     "class_distribution": {
       "Bageshree": 43,
       "Bhairav": 33,
@@ -15,9 +21,9 @@
     "confidence_field_present": false,
     "invalid_tonic_count": 0,
     "metadata_completeness": {
-      "fraction": 0.1989795918367347,
-      "missing": 1570,
-      "present": 390,
+      "fraction": 1.0,
+      "missing": 0,
+      "present": 1960,
       "total": 1960
     },
     "missing_confidence_count": null,
@@ -25610,7 +25616,7 @@
     ],
     "unreadable_files": []
   },
-  "audit_timestamp": "2026-11-03T21:27:09.848950+00:00",
+  "audit_timestamp": "2026-11-03T21:54:58.607658+00:00",
   "dataset_has_critical_errors": true,
   "dataset_root_identifier": "hindustani_dataset",
   "evaluation_readiness": {
@@ -106869,9 +106875,9 @@
   "records_per_source": {
     "<missing>": 1960
   },
-  "repository_commit": "d16e153a5a58e197efaf934c224f06f4ec34fd5b",
+  "repository_commit": "76d60d96e97194a83657caae7250494ac03f4122",
   "repository_source_tree_clean": false,
-  "repository_source_tree_fingerprint": "6f0d723d29f2464b1f257f7f6a7bd4dda5869422bc262a6dfd5862df0cbbbdc9",
+  "repository_source_tree_fingerprint": "5d1ff25ffcd63c3b62f95517b4bdfefa21fb7b913c1621eab10de03d8e735bb9",
   "schema_version": "1.0",
   "summary": {
     "duplicate_recording_id_count": 0,

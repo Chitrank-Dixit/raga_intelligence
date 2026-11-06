@@ -565,7 +565,11 @@ def audit_dataset(
             "unknown_raga_labels": unknown_labels,
             "class_distribution": dict(sorted(raga_counts.items())),
             "raw_label_distribution": dict(sorted(raw_label_counts.items())),
-            "metadata_completeness": _completeness(record_details, lambda rec: rec["canonical_raga"]),
+            # Label presence and canonical-vocabulary membership are distinct:
+            # an out-of-vocabulary annotation is present metadata, but not part
+            # of the canonical evaluation label set.
+            "metadata_completeness": _completeness(record_details, lambda rec: rec["raw_raga_label"]),
+            "canonical_label_coverage": _completeness(record_details, lambda rec: rec["canonical_raga"]),
             **annotations,
         },
         "provenance": {
@@ -692,6 +696,8 @@ def render_audit_markdown(audit: dict[str, Any]) -> str:
         "### Canonical raga coverage",
         "",
         _nested_table(audit["annotation_quality"]["class_distribution"], readiness["raga_class_coverage_by_split"]),
+        f"- Raga label metadata present: {audit['annotation_quality']['metadata_completeness']['present']}/{audit['annotation_quality']['metadata_completeness']['total']} ({audit['annotation_quality']['metadata_completeness']['fraction']:.1%})",
+        f"- Labels in canonical vocabulary: {audit['annotation_quality']['canonical_label_coverage']['present']}/{audit['annotation_quality']['canonical_label_coverage']['total']} ({audit['annotation_quality']['canonical_label_coverage']['fraction']:.1%})",
         f"- Missing annotation confidence: `{audit['annotation_quality']['missing_confidence_count']}`",
         f"- Missing review status: `{audit['annotation_quality']['missing_review_status_count']}`",
         f"- Missing tonic annotation: `{audit['annotation_quality']['missing_tonic_count']}`",
@@ -707,6 +713,16 @@ def render_audit_markdown(audit: dict[str, Any]) -> str:
     for name, metrics in audit["provenance"].items():
         if isinstance(metrics, dict) and "fraction" in metrics:
             lines.append(f"- {name.replace('_', ' ').title()}: {metrics['present']}/{metrics['total']} ({metrics['fraction']:.1%})")
+    provenance = audit["provenance"]
+    if provenance["lifecycle_classification_available"]:
+        lines.extend([
+            f"- Legacy records: {provenance['legacy_record_count']}",
+            f"- Newly accepted records: {provenance['newly_accepted_record_count']}",
+            f"- Records without a lifecycle status: {provenance['unclassified_lifecycle_record_count']}",
+        ])
+    else:
+        lines.append("- Record lifecycle classification: unavailable (no lifecycle status field was present).")
+    lines.append(f"- {provenance['note']}")
     lines.extend(["", "Audit is read-only; source records and audio files are not modified.", ""])
     return "\n".join(lines)
 
