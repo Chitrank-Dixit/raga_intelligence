@@ -322,6 +322,58 @@ def test_saraga_deterministic_group_partition():
     assert [it.split for it in partitioned1] == [it.split for it in partitioned2]
 
 
+def test_saraga_partition_uses_stable_performer_ids_not_display_names():
+    from raga_intelligence.datasets.saraga import SaragaHindustaniAdapter
+
+    adapter = SaragaHindustaniAdapter(dataset_dir="dummy", seed=42)
+    items = [
+        DatasetItem(
+            recording_id=f"rec-{index}", source="SaragaTest", file_path=f"{index}.wav",
+            raga="Bhairav", performer="Same display name", performer_id=f"artist-{index}",
+            performance_id=f"performance-{index}", duration_sec=1.0, sample_rate=24000,
+        )
+        for index in range(30)
+    ]
+
+    partitioned = adapter._partition_items(items)
+
+    assert len({item.split for item in partitioned}) > 1
+
+
+def test_saraga_missing_performer_id_keeps_performance_grouping():
+    from raga_intelligence.datasets.saraga import SaragaHindustaniAdapter
+
+    adapter = SaragaHindustaniAdapter(dataset_dir="dummy", seed=42)
+    items = [
+        DatasetItem(
+            recording_id=f"rec-{index}", source="SaragaTest", file_path=f"{index}.wav",
+            raga="Bhairav", performer="Same display name", performance_id="shared-performance",
+            duration_sec=1.0, sample_rate=24000,
+        )
+        for index in range(4)
+    ]
+
+    partitioned = adapter._partition_items(items)
+
+    assert len({item.split for item in partitioned}) == 1
+
+
+def test_saraga_performer_identity_requires_explicit_stable_source_id():
+    from raga_intelligence.datasets.saraga import _extract_performer_identity
+
+    display_name, performer_id = _extract_performer_identity(
+        {"lead_artist": {"name": "Known Artist"}}
+    )
+    assert display_name == "Known Artist"
+    assert performer_id is None
+
+    display_name, performer_id = _extract_performer_identity(
+        {"lead_artist": {"name": "Known Artist", "id": "source-artist-42"}}
+    )
+    assert display_name == "Known Artist"
+    assert performer_id == "source-artist-42"
+
+
 def test_training_fails_on_leakage():
     from raga_intelligence.training.trainer import _assert_no_split_leakage
 

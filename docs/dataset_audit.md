@@ -4,9 +4,10 @@ Run `python scripts/audit_dataset.py` to audit the configured
 `DATA_DIR/hindustani_dataset` dataset. Pass `--dataset-dir` to inspect another
 CSV-backed dataset, `--metadata-file` to select its manifest, and `--output-dir`
 to choose where JSON and Markdown reports are written. Report output must be
-outside the dataset root. The default outputs are
-`reports/dataset_audit/dataset_audit.json` and
-`reports/dataset_audit/dataset_audit.md`.
+outside the dataset root. By default, JSON and Markdown reports are generated
+locally under `reports/dataset_audit/`.
+These outputs are ignored by Git because they contain machine- and dataset-specific
+audit results; keep the implementation and documentation under version control.
 
 The audit reads each manifest row, hashes audio in chunks, and decodes one audio
 file at a time with Librosa. It does not edit audio, metadata, caches, or
@@ -30,6 +31,14 @@ reported and can still make the CLI return nonzero.
 The metadata fingerprint covers normalized manifest facts and relative paths.
 The audio content fingerprint is a separate hash over relative paths and file
 SHA-256 values and is unavailable unless every referenced file can be hashed.
+
+The audit separates split grouping from identity verification. Filename-derived
+IDs remain useful for checking whether a grouping key overlaps splits, but are
+not independently verified performance identities. Source metadata is identified
+as source-declared rather than independently reviewed; only records marked with
+`manual_review` provide the audit's independent identity evidence. JSON and
+Markdown output expose reliability levels and keep canonical evaluation readiness
+separate from dataset-wide integrity errors.
 
 The audit also reports schema-version, lifecycle, annotation, rights, and
 performance-identity-source distributions when those columns exist. Missing

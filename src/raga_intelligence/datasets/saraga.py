@@ -70,28 +70,31 @@ class SaragaHindustaniAdapter(BaseDatasetAdapter):
     def _partition_items(self, parsed_items: List[DatasetItem]) -> List[DatasetItem]:
         """
         Deterministically partitions items into train/val/test using group-based splitting
-        by performer (or performance/recording ID fallback). Guarantees zero leakage across splits.
+        by stable performer ID (or performance/recording ID fallback). Guarantees zero leakage
+        across the available grouping identities; display names are never used as stable IDs.
         """
         if not parsed_items:
             return []
 
         groups: Dict[str, List[DatasetItem]] = defaultdict(list)
-        unknown_performer_count = 0
+        missing_performer_id_count = 0
 
         for item in parsed_items:
-            if item.performer and item.performer not in ("Unknown", "unknown", ""):
-                group_key = f"performer::{item.performer}"
+            if item.performer_id and item.performer_id.strip().lower() not in {
+                "unknown", "none", "null"
+            }:
+                group_key = f"performer::{item.performer_id}"
             elif item.performance_id:
                 group_key = f"performance::{item.performance_id}"
-                unknown_performer_count += 1
+                missing_performer_id_count += 1
             else:
                 group_key = f"recording::{item.recording_id}"
-                unknown_performer_count += 1
+                missing_performer_id_count += 1
             groups[group_key].append(item)
 
-        if unknown_performer_count > 0:
+        if missing_performer_id_count > 0:
             logger.warning(
-                f"Performer metadata incomplete for {unknown_performer_count}/{len(parsed_items)} items. "
+                f"Stable performer IDs unavailable for {missing_performer_id_count}/{len(parsed_items)} items. "
                 "Fell back to performance/recording group key for those items."
             )
 
@@ -206,21 +209,7 @@ class SaragaHindustaniAdapter(BaseDatasetAdapter):
                     except ValueError:
                         tonic_hz = None
 
-                artist: Optional[str] = None
-                if "lead_artist" in data:
-                    la = data["lead_artist"]
-                    artist = la.get("name") if isinstance(la, dict) else str(la)
-                elif "artist" in data:
-                    art = data["artist"]
-                    artist = art.get("name") if isinstance(art, dict) else str(art)
-                elif "artists" in data and isinstance(data["artists"], list) and len(data["artists"]) > 0:
-                    for a in data["artists"]:
-                        if isinstance(a, dict) and (a.get("role") == "lead" or "name" in a):
-                            artist = a.get("name", "Unknown")
-                            break
-                        elif isinstance(a, str):
-                            artist = a
-                            break
+                artist, performer_id = _extract_performer_identity(data)
 
                 perf_id = None
                 for key in ("concert", "performance", "release", "album", "work"):
@@ -245,6 +234,7 @@ class SaragaHindustaniAdapter(BaseDatasetAdapter):
                             if artist and artist.strip().lower() not in {"unknown", "none", "null"}
                             else None
                         ),
+                        performer_id=performer_id,
                         performance_id=perf_id,
                         performance_identity_source=performance_identity_source,
                         source_recording_id=rec_id,
@@ -269,4 +259,36 @@ class SaragaHindustaniAdapter(BaseDatasetAdapter):
             manifest.add_item(item)
 
         return manifest
+
+
+def _extract_performer_identity(data: dict) -> tuple[Optional[str], Optional[str]]:
+    """Return display name and an explicitly supplied stable performer ID, if present."""
+    top_level_identity = _known_text(data.get("performer_id") or data.get("artist_id"))
+    for key in ("lead_artist", "artist"):
+        value = data.get(key)
+        if isinstance(value, dict):
+            name = value.get("name")
+            identity = value.get("performer_id") or value.get("artist_id") or value.get("id")
+            return _known_text(name), _known_text(identity) or top_level_identity
+        if value is not None:
+            return _known_text(value), top_level_identity
+
+    artists = data.get("artists")
+    if isinstance(artists, list):
+        for value in artists:
+            if isinstance(value, dict) and (value.get("role") == "lead" or "name" in value):
+                name = value.get("name")
+                identity = value.get("performer_id") or value.get("artist_id") or value.get("id")
+                return _known_text(name), _known_text(identity) or top_level_identity
+            if isinstance(value, str):
+                return _known_text(value), top_level_identity
+
+    return _known_text(data.get("performer")), top_level_identity
+
+
+def _known_text(value: object) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text if text.lower() not in {"", "unknown", "none", "null"} else None
 

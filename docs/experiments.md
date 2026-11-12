@@ -4,7 +4,7 @@
 > **Notice on Historical / Superseded Hybrid Benchmarks**
 > In early prototyping (commit `7525287`), the hybrid training script contained a synthetic fallback (`rng.standard_normal((len(X_train), mert_dim))`) when cached MERT representations were not yet extracted. Any early figures reported under that ungrounded configuration are **INVALIDATED AND SUPERSEDED**. They are preserved in the historical section below strictly for auditability and must **never** be cited as evidence of MERT representation capability.
 >
-> **Historical registry:** Existing figures below document earlier experiments and are not the current canonical benchmark. The Hindustani CSV has no artist field; previous use of video IDs as performer labels was invalid. Artist-level isolation is unverifiable for that corpus. The benchmark execution revision is clean commit `6eec1891715ba79e1bd607b058fc8c3426c02c76` (evaluation `9fedf9990c3d4576952a49b0999b9876`). PR HEAD before the current uncommitted review changes is `71902a2802eca91dcdf721f17af7c58f89a0ff84`; the benchmark is not claimed as run on that HEAD. Recording/performance isolation are verified and artist isolation remains unverifiable.
+> **Historical registry:** Existing figures below document earlier experiments and are not the current canonical benchmark. The Hindustani CSV has no artist field; previous use of video IDs as performer labels was invalid. Artist-level isolation is unverifiable for that corpus. The benchmark execution revision is clean commit `6eec1891715ba79e1bd607b058fc8c3426c02c76` (evaluation `9fedf9990c3d4576952a49b0999b9876`). PR HEAD before the current review changes is `71902a2802eca91dcdf721f17af7c58f89a0ff84`; the benchmark is not claimed as run on that HEAD. Recording isolation and non-overlap of the filename-derived performance grouping keys were verified; independent performance identity verification and artist isolation remain unverifiable.
 
 ---
 
@@ -153,7 +153,7 @@ Experiments are structured into three distinct status tiers:
 - **Evaluation split fingerprint**: `b5ba9f621f933b29b76fe0909fa99fa37ced8cc10626d8c2f0a169c91f54f171`
 - **Lockfile SHA-256**: `cf8239ba12fe3e9a23886a7b102824d8c19bb7a667ec11deccaf060d57c7e00d`
 - **Configuration**: seeds `[42, 123, 999]`, CPU, MERT revision `12af15fef9d0ac838c3f475bfbbf26d2060dd4f5`. Full configurations and metrics are generated in the report and its 15 records for this evaluation ID.
-- **Leakage audit**: recording and performance isolation are verified; performer isolation is not verifiable because the corpus has no artist metadata.
+- **Leakage audit**: recording isolation and filename-derived grouping-key non-overlap were checked; independent performance identity verification and performer isolation are not verifiable because the corpus has no independently reviewed performance identities or artist metadata.
 - **Retained records**: 15 current canonical records and 15 records from the previous clean evaluation (`b894d85b7bf4dfc0d4e31bb1bfa3ce1a0369185d`, evaluation `0e7c1a57ddd34642a484913cca5737fc`) retained as historical. The report generator selects only the current evaluation ID. An interim evaluation performed before the full-tree cleanup was not retained.
 - **Curated records**: 60 older experiment JSONs were removed after provenance review. They lacked an evaluation ID and clean-tree/split provenance (and the earliest 30 also lacked a dataset fingerprint), so they could not be tied to a complete reproducible report. The canonical ablation artifact is retained.
 

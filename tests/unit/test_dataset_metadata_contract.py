@@ -121,19 +121,6 @@ def test_invalid_recording_and_audio_metadata_is_rejected(updates):
         minimal_item(**updates)
 
 
-@pytest.mark.parametrize("updates", [
-    {"recording_id": "  "},
-    {"file_path": ""},
-    {"duration_sec": 0.0},
-    {"sample_rate": 0},
-    {"tonic_hz": 0.0},
-    {"audio_sha256": "not-a-hash"},
-])
-def test_invalid_recording_and_audio_metadata_is_rejected(updates):
-    with pytest.raises(ValidationError):
-        minimal_item(**updates)
-
-
 def test_raw_noncanonical_label_is_preserved_without_canonicalization():
     item = minimal_item(raga="Unmapped Source Label", raw_raga_label="Unmapped Source Label")
     assert item.raga == "Unmapped Source Label"

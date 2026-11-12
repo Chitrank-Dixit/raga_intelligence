@@ -30,6 +30,13 @@ CONFIDENCE_COLUMNS = ("annotation_confidence", "confidence")
 REVIEW_COLUMNS = ("review_status", "annotation_status", "reviewed")
 RIGHTS_UNCERTAIN = {"unknown", "pending", "restricted", "unclear", "", "none", "null"}
 _FILENAME_PERFORMANCE_PATTERN = re.compile(r"\[([a-zA-Z0-9_-]+)\]")
+PERFORMANCE_IDENTITY_RELIABILITY = {
+    "manual_review": "independently_reviewed",
+    "metadata": "source_metadata_not_independently_reviewed",
+    "filename_pattern": "inferred_from_filename",
+    "unknown": "unknown",
+    "missing": "unknown",
+}
 
 
 class DatasetAuditError(ValueError):
@@ -347,6 +354,7 @@ def audit_dataset(
         )
         if performance_identity_source is None:
             performance_identity_source = performance_origin
+        performance_identity_source = performance_identity_source.strip().lower()
         detail = {
             "metadata_row": index,
             "recording_id": recording_id,
@@ -360,6 +368,9 @@ def audit_dataset(
             "split_identity_source": split_origin,
             "performance_id": performance_id,
             "performance_identity_source": performance_identity_source,
+            "performance_identity_reliability": PERFORMANCE_IDENTITY_RELIABILITY.get(
+                performance_identity_source, "unknown"
+            ),
             "performer_id": performer_id,
             "performer_display_name": performer_display_name,
             "audio": audio,
@@ -441,6 +452,32 @@ def audit_dataset(
         split: len({rec["performance_id"] for rec in canonical_records if rec["split"] == split and rec["performance_id"]})
         for split in ("train", "val", "test")
     }
+    evaluation_performance_sources = Counter(
+        rec["performance_identity_source"] if rec["performance_id"] else "missing"
+        for rec in canonical_records
+    )
+    performance_identity_review_complete = bool(canonical_records) and all(
+        rec["performance_id"] and rec["performance_identity_source"] == "manual_review"
+        for rec in canonical_records
+    )
+    performance_grouping_verifiable = (
+        bool(canonical_records)
+        and evaluation_missing_performance == 0
+        and evaluation_missing_split == 0
+    )
+    performance_identity_verifiable = (
+        performance_identity_review_complete and evaluation_missing_split == 0
+    )
+    performance_grouping_status = (
+        "failed" if evaluation_performance_overlap
+        else "not_verifiable" if not performance_grouping_verifiable
+        else "verified"
+    )
+    performance_identity_status = (
+        "failed" if evaluation_performance_overlap
+        else "verified" if performance_identity_verifiable
+        else "not_verifiable"
+    )
 
     source_completeness = _completeness(record_details, lambda rec: rec["source"])
     source_url_completeness = _completeness(record_details, lambda rec: rec["provenance"]["source_url"])
@@ -501,6 +538,12 @@ def audit_dataset(
         issues.append({"severity": "WARNING", "code": "missing_metadata", "message": f"{issue_counts['missing_metadata']} record(s) have required annotation/identity fields missing."})
     if issue_counts["missing_performance_id"]:
         issues.append({"severity": "ERROR", "code": "performance_isolation_unverifiable", "message": f"{issue_counts['missing_performance_id']} record(s) lack a performance ID; scientific evaluation requires complete performance identities."})
+    elif canonical_records and not performance_identity_review_complete:
+        issues.append({
+            "severity": "WARNING",
+            "code": "performance_identity_not_independently_verified",
+            "message": "Performance IDs do not have manual-review evidence; non-overlapping grouping IDs alone do not verify performance identity.",
+        })
     if issue_counts["missing_performer_id"]:
         issues.append({"severity": "WARNING", "code": "performer_isolation_unverifiable", "message": f"{issue_counts['missing_performer_id']} record(s) lack performer metadata; performer-held-out generalization cannot be claimed."})
     if duplicate_audio:
@@ -567,6 +610,8 @@ def audit_dataset(
                 "missing_count": issue_counts["missing_performance_id"],
                 "unique_performances": len(performance_to_rows),
                 "identity_source_counts": dict(Counter(rec["performance_identity_source"] for rec in record_details)),
+                "identity_source_reliability": dict(PERFORMANCE_IDENTITY_RELIABILITY),
+                "reliability_counts": dict(Counter(rec["performance_identity_reliability"] for rec in record_details)),
                 "recordings_per_performance": {key: len(value) for key, value in sorted(performance_to_rows.items())},
                 "raga_coverage_per_performance": {key: sorted(value) for key, value in sorted(performance_ragas.items())},
                 "split_overlap": performance_overlap,
@@ -648,8 +693,13 @@ def audit_dataset(
             "evaluation_scope_record_count": len(canonical_records),
             "recording_isolation_status": "failed" if evaluation_recording_overlap else "not_verifiable" if evaluation_missing_recording or evaluation_missing_split else "verified",
             "recording_split_overlap": evaluation_recording_overlap,
-            "performance_isolation_status": "failed" if evaluation_performance_overlap else "not_verifiable" if evaluation_missing_performance or evaluation_missing_split else "verified",
-            "performance_isolation_verifiable": evaluation_missing_performance == 0 and evaluation_missing_split == 0,
+            "performance_isolation_status": performance_identity_status,
+            "performance_isolation_verifiable": performance_identity_verifiable,
+            "performance_identity_verification_status": performance_identity_status,
+            "performance_identity_verification_verifiable": performance_identity_verifiable,
+            "performance_grouping_split_isolation_status": performance_grouping_status,
+            "performance_grouping_split_isolation_verifiable": performance_grouping_verifiable,
+            "performance_identity_source_counts": dict(evaluation_performance_sources),
             "performer_isolation_status": "failed" if evaluation_performer_overlap else "not_verifiable" if evaluation_missing_performer or evaluation_missing_split else "verified",
             "performer_isolation_verifiable": evaluation_missing_performer == 0 and evaluation_missing_split == 0,
             "missing_performance_id_count": evaluation_missing_performance,
@@ -665,6 +715,7 @@ def audit_dataset(
                 and evaluation_missing_recording == 0
                 and evaluation_missing_split == 0
                 and evaluation_missing_performance == 0
+                and performance_identity_status == "verified"
                 and not evaluation_duplicate_record_ids
                 and not evaluation_performance_overlap
                 and not evaluation_recording_overlap
@@ -753,9 +804,11 @@ def render_audit_markdown(audit: dict[str, Any]) -> str:
         "",
         f"- Recording isolation: **{readiness['recording_isolation_status']}**",
         f"- Performance isolation: **{readiness['performance_isolation_status']}** (verifiable: {readiness['performance_isolation_verifiable']})",
+        f"- Performance grouping split isolation: **{readiness['performance_grouping_split_isolation_status']}**",
+        f"- Performance identity sources: `{readiness['performance_identity_source_counts']}`",
+        f"- Identity source reliability: `{audit['identity_coverage']['performance']['identity_source_reliability']}`",
         f"- Performer isolation: **{readiness['performer_isolation_status']}** (verifiable: {readiness['performer_isolation_verifiable']})",
         f"- Performer ID coverage: {performer_id_coverage['present']}/{performer_id_coverage['total']}",
-        f"- Performance identity sources: `{audit['identity_coverage']['performance']['identity_source_counts']}`",
         f"- Evaluation scope records / unavailable audio: {readiness['evaluation_scope_record_count']} / {readiness['unavailable_or_unreadable_audio_count']}",
         f"- Canonical records without split assignment: {readiness['missing_split_assignment_count']}",
         f"- Canonical evaluation scope ready: **{readiness['scientific_evaluation_ready']}**",

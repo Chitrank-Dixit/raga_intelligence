@@ -14,7 +14,7 @@ from scripts.audit_dataset import main
 
 CSV_FIELDS = [
     "recording_id", "file_name", "label", "tonic_hz", "performance_id", "performer", "performer_id",
-    "source", "source_url", "license", "attribution", "split",
+    "performance_identity_source", "source", "source_url", "license", "attribution", "split",
 ]
 
 
@@ -42,6 +42,7 @@ def valid_rows(root: Path) -> list[dict]:
             rows.append({
                 "recording_id": f"{raga}_{suffix}", "file_name": name, "label": raga,
                 "tonic_hz": "220", "performance_id": f"performance_{raga}_{suffix}",
+                "performance_identity_source": "manual_review",
                 "performer": f"Artist {raga} {suffix}", "performer_id": f"artist_{raga}_{suffix}", "source": "fixture",
                 "source_url": "https://example.invalid/source", "license": "CC0-1.0",
                 "attribution": "Fixture author", "split": split,
@@ -61,6 +62,23 @@ def test_fully_valid_dataset_has_expected_inventory_and_readiness(tmp_path):
     assert result["evaluation_readiness"]["performance_isolation_status"] == "verified"
     assert result["evaluation_readiness"]["performer_isolation_status"] == "verified"
     assert result["annotation_quality"]["unknown_raga_labels"] == []
+
+
+def test_source_metadata_performance_ids_are_not_independently_verified(tmp_path):
+    rows = valid_rows(tmp_path)
+    for row in rows:
+        row["performance_identity_source"] = "metadata"
+    write_manifest(tmp_path, rows)
+
+    result = audit_dataset(tmp_path)
+
+    readiness = result["evaluation_readiness"]
+    assert readiness["performance_grouping_split_isolation_status"] == "verified"
+    assert readiness["performance_identity_verification_status"] == "not_verifiable"
+    assert readiness["performance_identity_source_counts"] == {"metadata": 20}
+    markdown = render_audit_markdown(result)
+    assert "Performance grouping split isolation: **verified**" in markdown
+    assert "Performance isolation: **not_verifiable**" in markdown
 
 
 def test_noncanonical_missing_rows_do_not_expand_canonical_evaluation_scope(tmp_path):
@@ -224,14 +242,25 @@ def test_filename_performance_rule_is_disclosed_and_never_populates_performer(tm
     rows = valid_rows(tmp_path)
     for row in rows:
         row.pop("performance_id")
+        row.pop("performance_identity_source")
         row["performer"] = "unknown"
         row["performer_id"] = "unknown"
-    write_manifest(tmp_path, rows, [field for field in CSV_FIELDS if field != "performance_id"])
+    write_manifest(
+        tmp_path, rows,
+        [field for field in CSV_FIELDS if field not in {"performance_id", "performance_identity_source"}],
+    )
 
     result = audit_dataset(tmp_path)
 
     assert result["identity_coverage"]["performance"]["missing_count"] == 0
     assert result["identity_coverage"]["performance"]["identity_source_counts"] == {"filename_pattern": 20}
+    readiness = result["evaluation_readiness"]
+    assert readiness["performance_grouping_split_isolation_status"] == "verified"
+    assert readiness["performance_identity_verification_status"] == "not_verifiable"
+    assert readiness["scientific_evaluation_ready"] is False
+    assert result["identity_coverage"]["performance"]["reliability_counts"] == {
+        "inferred_from_filename": 20
+    }
     assert result["identity_coverage"]["performer"]["missing_count"] == 20
     assert all(record["performer_id"] is None for record in result["records"])
 
@@ -244,6 +273,7 @@ def test_performance_leakage_across_splits_is_reported(tmp_path):
     result = audit_dataset(tmp_path)
 
     assert result["evaluation_readiness"]["performance_isolation_status"] == "failed"
+    assert result["evaluation_readiness"]["performance_isolation_verifiable"] is True
     assert any(issue["code"] == "performance_leakage" for issue in result["issues"])
 
 
