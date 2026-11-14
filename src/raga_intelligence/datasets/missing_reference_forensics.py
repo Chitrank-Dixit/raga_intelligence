@@ -675,6 +675,13 @@ def render_forensics_markdown(report: dict[str, Any]) -> str:
         f"{report['source_analysis']['references_with_source_recording_id']}",
         "- Missing references without one: "
         f"{report['source_analysis']['references_without_source_recording_id']}",
+        "- Missing rows with filename-derived grouping keys: "
+        f"{report['source_analysis']['missing_records_with_filename_group_key']} rows, "
+        f"{report['source_analysis']['unique_missing_filename_group_keys']} unique keys",
+        "- Unique filename-derived grouping keys for present audio: "
+        f"{report['source_analysis']['unique_present_filename_group_keys']}",
+        "- Missing/present filename grouping key overlap: "
+        f"{report['source_analysis']['filename_group_key_overlap_with_present_records']}",
         "- Source mapping/path conventions documented for these rows: "
         f"{len(report['source_analysis']['source_path_conventions_documented_for_missing_rows'])}",
         "- Source distributions are grouped from manifest fields only; no source is inferred.",
