@@ -2,38 +2,68 @@
 
 from __future__ import annotations
 
-import csv
+import hashlib
 import json
 import os
 import re
-import subprocess
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 from urllib.parse import urlsplit
 
-from raga_intelligence.datasets.audit import _relative_path, audit_dataset
+from raga_intelligence.datasets.audit import (
+    PERFORMANCE_COLUMNS,
+    PERFORMER_COLUMNS,
+    PERFORMER_DISPLAY_COLUMNS,
+    SOURCE_COLUMNS,
+    DatasetAuditError,
+    _FILENAME_PERFORMANCE_PATTERN,
+    _first_controlled_value,
+    _first_value,
+    _git_commit,
+    _git_source_tree_state,
+    _hash_json,
+    _identity,
+    _manifest_audio_reference,
+    _relative_path,
+    _safe_source_reference,
+    load_dataset_manifest,
+)
 
 _AUDIO_EXTENSIONS = {".aac", ".flac", ".m4a", ".mp3", ".ogg", ".wav", ".wma"}
 _EXCLUDED_DIRECTORIES = {
+    ".cache",
+    ".coverage",
+    ".env",
     ".git",
+    ".mypy_cache",
+    ".nox",
+    ".tox",
     ".venv",
     ".venv-linux",
-    "venv",
-    "__pycache__",
     ".pytest_cache",
     ".ruff_cache",
     ".task_pytest_tmp",
+    "__pycache__",
+    "build",
+    "cache",
+    "dist",
+    "env",
+    "generated",
+    "htmlcov",
     "node_modules",
     "reports",
+    "site-packages",
+    "target",
+    "venv",
 }
 _CLASSIFICATIONS = (
     "alternate_local_location_candidate",
     "duplicate_reference_candidate",
     "path_convention_mismatch",
     "possible_segment_reference",
-    "source_record_available_audio_missing",
+    "source_metadata_present_audio_unlocated",
     "unresolved",
 )
 _SEGMENT_PATTERN = re.compile(
@@ -49,17 +79,8 @@ class MissingReferenceForensicsError(ValueError):
     """Raised when forensic analysis cannot load its manifest or roots."""
 
 
-def _git_commit() -> str | None:
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True, timeout=3
-        )
-        return result.stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        return None
-
-
 def _is_absolute_reference(value: str) -> bool:
+    value = value.strip()
     return (
         value.lower().startswith("file://")
         or Path(value).is_absolute()
@@ -69,7 +90,7 @@ def _is_absolute_reference(value: str) -> bool:
 
 
 def _normalized_reference(value: str) -> str:
-    normalized = value.replace("\\", "/")
+    normalized = value.strip().replace("\\", "/")
     path = PurePosixPath(normalized)
     return path.as_posix()
 
@@ -127,41 +148,32 @@ def _has_token_sequence(value: str, expected: list[str]) -> bool:
     )
 
 
-def _raw_audio_value(row: dict[str, str]) -> str | None:
-    normalized = {key.strip().lower(): value for key, value in row.items()}
-    for name in ("file_name", "file_path", "audio_path", "path"):
-        value = normalized.get(name)
-        if value is not None and value.strip():
-            return value
-    return None
-
-
 def _safe_reference(value: str | None) -> tuple[str | None, str | None]:
     if value is None:
         return None, None
     if _is_absolute_reference(value):
-        import hashlib
-
         digest = hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()
         return "<absolute path redacted>", digest
     return value, None
 
 
-def _record_source(row: dict[str, str]) -> tuple[str | None, str | None]:
-    normalized = {key.strip().lower(): value for key, value in row.items()}
-
-    def first(names: tuple[str, ...]) -> str | None:
-        for name in names:
-            value = normalized.get(name, "").strip()
-            if value and value.casefold() not in {"unknown", "none", "null"}:
-                return value
-        return None
-
-    source = first(("source", "dataset_source", "source_collection", "collection"))
-    source_recording_id = first(("source_recording_id",))
-    safe_source, _ = _safe_reference(source)
-    safe_source_recording_id, _ = _safe_reference(source_recording_id)
-    return safe_source, safe_source_recording_id
+def _missing_path_fingerprint(
+    normalized_reference: str | None,
+    original_reference: str | None,
+    absolute_path_hash: str | None,
+) -> str:
+    if normalized_reference is not None:
+        identity = ["relative", normalized_reference]
+    elif absolute_path_hash is not None:
+        normalized_absolute = _normalized_reference(original_reference or "")
+        if normalized_absolute.lower().startswith("file://"):
+            parsed = urlsplit(normalized_absolute)
+            normalized_absolute = f"file://{parsed.netloc}{parsed.path}"
+        identity = ["absolute", normalized_absolute]
+    else:
+        identity = ["missing", ""]
+    serialized = json.dumps(identity, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def _candidate_evidence(
@@ -173,6 +185,7 @@ def _candidate_evidence(
     dataset_root: Path,
 ) -> list[dict[str, Any]]:
     if not normalized_path:
+        reference = reference.strip()
         if reference.lower().startswith("file://"):
             basename = PurePosixPath(urlsplit(reference).path).name
         else:
@@ -265,7 +278,7 @@ def _classify(record: dict[str, Any]) -> str:
     if "same_filename_source_id_different_chunk" in evidence:
         return "possible_segment_reference"
     if record["source"] and record["source_recording_id"] and not record["local_candidates"]:
-        return "source_record_available_audio_missing"
+        return "source_metadata_present_audio_unlocated"
     if record["local_candidates"]:
         return "alternate_local_location_candidate"
     return "unresolved"
@@ -288,28 +301,69 @@ def analyze_missing_references(
     if not search.is_dir():
         raise MissingReferenceForensicsError(f"Search root does not exist: {search_root}")
 
-    audit = audit_dataset(root, metadata_file)
-    csv_path = Path(metadata_file) if metadata_file else root / "metadata.csv"
-    if not csv_path.is_absolute():
-        csv_path = root / csv_path
     try:
-        with csv_path.open("r", encoding="utf-8-sig", newline="") as stream:
-            rows = list(csv.DictReader(stream))
-    except (OSError, UnicodeError, csv.Error) as exc:
+        root, csv_path, frame = load_dataset_manifest(root, metadata_file)
+    except DatasetAuditError as exc:
         raise MissingReferenceForensicsError(
-            f"Could not reread metadata CSV: {type(exc).__name__}"
+            str(exc)
         ) from exc
 
     audio_files, scan_failures = _audio_files(search)
     records: list[dict[str, Any]] = []
-    for audited in audit["records"]:
-        if audited["audio"]["exists"]:
-            continue
-        row_index = int(audited["metadata_row"]) - 2
-        raw_row = rows[row_index] if 0 <= row_index < len(rows) else {}
-        original = _raw_audio_value(raw_row)
+    present_references = 0
+    present_filename_groups: set[str] = set()
+    columns = {str(column).strip().lower() for column in frame.columns}
+    has_recording_id_column = "recording_id" in columns
+    has_performance_column = any(column in columns for column in PERFORMANCE_COLUMNS)
+    for row_number, raw in enumerate(frame.to_dict(orient="records"), start=2):
+        row = {str(key).strip().lower(): value for key, value in raw.items()}
+        reference_value = _manifest_audio_reference(row)
+        original = str(reference_value) if reference_value is not None else None
         normalized, expected_path, path_error = _relative_path(root, original)
-        source, source_recording_id = _record_source(raw_row)
+        reference_exists = expected_path is not None and expected_path.is_file()
+
+        recording_id = _identity(row.get("recording_id"))
+        if recording_id is None and not has_recording_id_column and normalized:
+            recording_id = Path(normalized).stem
+        if recording_id is None:
+            recording_id = f"__missing_recording_id_row_{row_number}"
+
+        performance_id = _first_value(row, PERFORMANCE_COLUMNS)
+        performance_origin = "metadata" if performance_id else "missing"
+        if performance_id is None and not has_performance_column and normalized:
+            match = _FILENAME_PERFORMANCE_PATTERN.search(normalized)
+            if match and _identity(match.group(1)):
+                performance_id = _identity(match.group(1))
+                performance_origin = "filename_pattern"
+        source_claim = _first_controlled_value(row, ("performance_identity_source",))
+        if source_claim is not None:
+            source_claim = source_claim.strip().lower()
+        performance_identity_source = (
+            "filename_pattern"
+            if performance_origin == "filename_pattern"
+            else (source_claim or "metadata")
+            if performance_origin == "metadata"
+            else "unknown"
+        )
+        raw_source = _first_value(row, SOURCE_COLUMNS)
+        source = _safe_source_reference(raw_source)
+        raw_source_recording_id = _first_value(row, ("source_recording_id",))
+        source_recording_id = _safe_source_reference(raw_source_recording_id)
+        source_id_for_matching = (
+            raw_source_recording_id
+            if source_recording_id == raw_source_recording_id
+            else None
+        )
+        performer_id = _first_value(row, PERFORMER_COLUMNS)
+        performer_display_name = _first_value(row, PERFORMER_DISPLAY_COLUMNS)
+        raw_raga_label = _identity(row.get("label") or row.get("raga"))
+
+        if reference_exists:
+            present_references += 1
+            if performance_identity_source == "filename_pattern" and performance_id:
+                present_filename_groups.add(performance_id)
+            continue
+
         safe_original, reference_hash = _safe_reference(original)
         normalized_reference = (
             _normalized_reference(original)
@@ -319,7 +373,7 @@ def analyze_missing_references(
         local_candidates = _candidate_evidence(
             original or "",
             normalized,
-            source_recording_id,
+            source_id_for_matching,
             audio_files,
             search,
             root,
@@ -331,12 +385,15 @@ def analyze_missing_references(
             except ValueError:
                 relative_expected = None
         record = {
-            "metadata_row": audited["metadata_row"],
-            "recording_id": audited["recording_id"],
+            "metadata_row": row_number,
+            "recording_id": recording_id,
             "original_reference_path": safe_original,
             "absolute_reference_redacted": reference_hash is not None,
             "reference_path_sha256": reference_hash,
             "normalized_reference_path": normalized_reference,
+            "missing_path_fingerprint": _missing_path_fingerprint(
+                normalized_reference, original, reference_hash
+            ),
             "resolved_expected_path": relative_expected,
             "reference_path_type": (
                 "absolute"
@@ -346,14 +403,14 @@ def analyze_missing_references(
                 else "missing"
             ),
             "path_resolution_error": path_error,
-            "reference_exists": False,
+            "reference_exists": reference_exists,
             "source": source,
             "source_recording_id": source_recording_id,
-            "performance_id": audited["performance_id"],
-            "performance_identity_source": audited["performance_identity_source"],
-            "raw_raga_label": audited["raw_raga_label"],
-            "performer_display_name": audited["performer_display_name"],
-            "performer_id": audited["performer_id"],
+            "performance_id": performance_id,
+            "performance_identity_source": performance_identity_source,
+            "raw_raga_label": raw_raga_label,
+            "performer_display_name": performer_display_name,
+            "performer_id": performer_id,
             "local_candidates": local_candidates,
             "forensic_classification": None,
             "evidence_strength": (
@@ -430,49 +487,46 @@ def analyze_missing_references(
             candidate_count += 1
             candidate_evidence_counts.update(candidate["evidence"])
 
-    present_references = [item for item in audit["records"] if item["audio"]["exists"]]
     missing_filename_groups = {
         record["performance_id"]
         for record in records
         if record["performance_identity_source"] == "filename_pattern"
         and record["performance_id"]
     }
-    present_filename_groups = {
-        record["performance_id"]
-        for record in present_references
-        if record["performance_identity_source"] == "filename_pattern"
-        and record["performance_id"]
-    }
-    metadata_path = Path(metadata_file) if metadata_file else root / "metadata.csv"
-    if not metadata_path.is_absolute():
-        metadata_path = root / metadata_path
+    normalized_manifest_rows = [
+        {
+            str(key).strip().lower(): None if value is None else str(value)
+            for key, value in raw.items()
+        }
+        for raw in frame.to_dict(orient="records")
+    ]
+    manifest_fingerprint = _hash_json(normalized_manifest_rows)
+    source_tree_clean, source_tree_fingerprint = _git_source_tree_state()
     try:
-        manifest_path = metadata_path.resolve().relative_to(search).as_posix()
+        manifest_path = csv_path.resolve().relative_to(search).as_posix()
     except ValueError:
-        manifest_path = metadata_path.name
+        manifest_path = csv_path.name
 
     return {
         "schema_version": "1.0",
         "audit_timestamp": datetime.now(timezone.utc).isoformat(),
         "repository_commit": _git_commit(),
-        "repository_source_tree_clean": audit["repository_source_tree_clean"],
-        "repository_source_tree_fingerprint": audit["repository_source_tree_fingerprint"],
+        "repository_source_tree_clean": source_tree_clean,
+        "repository_source_tree_fingerprint": source_tree_fingerprint,
         "dataset_root_identifier": root.name,
         "search_root_identifier": search.name,
         "manifest_path": manifest_path,
-        "manifest_fingerprint": audit["manifest_fingerprint"],
+        "manifest_fingerprint": manifest_fingerprint,
+        "manifest_fingerprint_policy": "normalized_manifest_csv_rows_v1",
         "path_resolution_policy": "datasets.audit._relative_path",
         "summary": {
-            "manifest_records_examined": len(audit["records"]),
+            "manifest_records_examined": len(frame.index),
             "missing_references": len(records),
-            "present_references": len(present_references),
+            "present_references": present_references,
             "references_analyzed": len(records),
             "unresolved_references": unresolved_count,
             "unique_missing_paths": len(
-                {
-                    record["normalized_reference_path"] or record["original_reference_path"]
-                    for record in records
-                }
+                {record["missing_path_fingerprint"] for record in records}
             ),
             "local_audio_candidates_found": candidate_count,
             "unique_local_candidate_files": len(candidate_reference_counts),
@@ -507,6 +561,11 @@ def analyze_missing_references(
         },
         "candidate_analysis": {
             "search_root_identifier": search.name,
+            "search_scope": "Recursive search for audio-file extensions below the configured search root.",
+            "excluded_directory_names": sorted(_EXCLUDED_DIRECTORIES),
+            "symlink_directories_followed": False,
+            "symlink_audio_files_indexed": False,
+            "locations_outside_search_root_searched": False,
             "local_audio_file_count": len(audio_files),
             "candidate_match_count": candidate_count,
             "unique_candidate_file_count": len(candidate_reference_counts),
@@ -516,6 +575,7 @@ def analyze_missing_references(
             ),
             "candidate_evidence_counts": dict(sorted(candidate_evidence_counts.items())),
             "identity_verified_from_candidate_match": False,
+            "filesystem_scan_complete": not scan_failures,
             "filesystem_scan_incomplete_paths": scan_failures,
         },
         "source_analysis": {
@@ -551,9 +611,10 @@ def analyze_missing_references(
                 "A local file has an exact filename, same stem, source-ID token, or "
                 "path-suffix match outside the expected location; identity is unverified."
             ),
-            "source_record_available_audio_missing": (
-                "Both source and source_recording_id are explicit, but no matching "
-                "local audio candidate was found."
+            "source_metadata_present_audio_unlocated": (
+                "Source and source_recording_id metadata are present in the manifest, "
+                "but the referenced audio was not located in the searched local "
+                "filesystem. Upstream source availability has not been verified."
             ),
             "possible_segment_reference": (
                 "A different chunk filename with the same bracketed filename identifier "
@@ -563,7 +624,10 @@ def analyze_missing_references(
                 "The same local candidate is suggested for multiple missing manifest "
                 "rows; each mapping requires review."
             ),
-            "unresolved": "No supported local explanation was found.",
+            "unresolved": (
+                "No supported local explanation was found within the searched locations; "
+                "excluded locations and upstream availability were not checked."
+            ),
         },
         "evidence_level_definitions": {
             "exact_path_match": (
@@ -591,10 +655,12 @@ def analyze_missing_references(
         },
         "limitations": [
             "No external datasets or restricted sources were accessed.",
+        "The forensic analysis does not decode, load, or hash any audio file.",
             "No candidate file is decoded or treated as the missing asset; path and name "
             "evidence cannot prove byte identity.",
-            "The repository search excludes Git metadata, Python environments/caches, "
-            "and generated report directories.",
+            "The repository search excludes the directory names listed in "
+            "candidate_analysis.excluded_directory_names. Symlink directories and "
+            "files are skipped; locations outside the configured search root are not searched.",
             "Missing source mapping, acquisition history, and upstream path documentation "
             "cannot be reconstructed from filenames alone.",
             "Absolute manifest paths are redacted; a SHA-256 of the original path value "
@@ -634,6 +700,7 @@ def render_forensics_markdown(report: dict[str, Any]) -> str:
         f"Repository commit: `{report['repository_commit']}`",
         f"Source tree clean: `{report['repository_source_tree_clean']}`  ",
         f"Source tree fingerprint: `{report['repository_source_tree_fingerprint']}`",
+        f"Manifest fingerprint policy: `{report['manifest_fingerprint_policy']}`",
         "",
         "## B. Classification summary",
         "",
@@ -660,7 +727,18 @@ def render_forensics_markdown(report: dict[str, Any]) -> str:
         "",
         "## D. Local candidate analysis",
         "",
+        f"- Search scope: {report['candidate_analysis']['search_scope']}",
         f"- Local audio files searched: {report['candidate_analysis']['local_audio_file_count']}",
+        "- Excluded directory names: "
+        f"`{report['candidate_analysis']['excluded_directory_names']}`",
+        "- Symlink directories/files followed/indexed: "
+        f"{report['candidate_analysis']['symlink_directories_followed']}/"
+        f"{report['candidate_analysis']['symlink_audio_files_indexed']}",
+        "- Locations outside the search root were searched: "
+        f"{report['candidate_analysis']['locations_outside_search_root_searched']}",
+        "- Filesystem scan complete: "
+        f"{report['candidate_analysis']['filesystem_scan_complete']}; incomplete paths: "
+        f"{report['candidate_analysis']['filesystem_scan_incomplete_paths']}",
         "- Candidate evidence counts: "
         f"`{report['candidate_analysis']['candidate_evidence_counts']}`",
         "- Candidate files suggested by multiple rows: "
@@ -668,6 +746,13 @@ def render_forensics_markdown(report: dict[str, Any]) -> str:
         "- No candidate match is treated as verified identity or exact audio duplication.",
         "- Complete record-level candidates, evidence, and limitations are in the "
         "JSON `records` array.",
+        "",
+        "### Classification meanings",
+        "",
+    ])
+    for classification, definition in report["classification_definitions"].items():
+        lines.append(f"- `{classification}`: {definition}")
+    lines.extend([
         "",
         "## E. Source analysis",
         "",

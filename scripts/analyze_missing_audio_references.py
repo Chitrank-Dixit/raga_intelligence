@@ -65,6 +65,13 @@ def main(argv: list[str] | None = None) -> int:
     except MissingReferenceForensicsError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
+    except Exception as exc:
+        print(
+            "ERROR: forensic analysis or report generation failed "
+            f"({type(exc).__name__}): {exc}",
+            file=sys.stderr,
+        )
+        return 1
 
     summary = report["summary"]
     print(f"JSON report: {json_path}")

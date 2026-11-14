@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from raga_intelligence.datasets import audit as dataset_audit
 from raga_intelligence.datasets.missing_reference_forensics import (
     analyze_missing_references,
     render_forensics_markdown,
@@ -76,7 +77,8 @@ def test_absolute_missing_reference_is_redacted_and_not_resolved(tmp_path):
     absolute = tmp_path / "outside" / "private track.wav"
     write_manifest(dataset, [missing_row(str(absolute))])
 
-    record = analyze(dataset, tmp_path)["records"][0]
+    report = analyze(dataset, tmp_path)
+    record = report["records"][0]
 
     assert record["reference_path_type"] == "absolute"
     assert record["absolute_reference_redacted"] is True
@@ -90,7 +92,8 @@ def test_local_file_uri_is_redacted(tmp_path):
     dataset = tmp_path / "dataset"
     write_manifest(dataset, [missing_row("file:///private/audio/track.wav")])
 
-    record = analyze(dataset, tmp_path)["records"][0]
+    report = analyze(dataset, tmp_path)
+    record = report["records"][0]
 
     assert record["reference_path_type"] == "absolute"
     assert record["original_reference_path"] == "<absolute path redacted>"
@@ -207,15 +210,105 @@ def test_candidate_search_excludes_python_environment_audio(tmp_path):
     assert report["records"][0]["forensic_classification"] == "unresolved"
 
 
-def test_source_record_available_without_local_audio_is_explicit_classification(tmp_path):
+def test_source_metadata_does_not_claim_upstream_availability(tmp_path):
     dataset = tmp_path / "dataset"
     row = missing_row("missing.wav", source="source_collection", source_recording_id="item-42")
     write_manifest(dataset, [row])
 
+    report = analyze(dataset, tmp_path)
+    record = report["records"][0]
+
+    assert record["forensic_classification"] == "source_metadata_present_audio_unlocated"
+    assert record["evidence_strength"] == "manifest_source_metadata"
+    definition = report["classification_definitions"][record["forensic_classification"]]
+    assert "Upstream source availability has not been verified" in definition
+    assert "source_record_available_audio_missing" not in json.dumps(report)
+
+
+def test_analysis_does_not_run_full_audio_audit_or_decode_present_audio(tmp_path, monkeypatch):
+    dataset = tmp_path / "dataset"
+    write_manifest(dataset, [
+        missing_row("present.wav", recording_id="present"),
+        missing_row("missing.wav", recording_id="missing"),
+    ])
+    (dataset / "present.wav").write_bytes(b"present audio bytes")
+
+    def unexpected(*_args, **_kwargs):
+        raise AssertionError("full audio audit or audio read was invoked")
+
+    monkeypatch.setattr(dataset_audit, "audit_dataset", unexpected)
+    monkeypatch.setattr(dataset_audit.librosa, "load", unexpected)
+    monkeypatch.setattr(dataset_audit, "_sha256_file", unexpected)
+
+    report = analyze(dataset, tmp_path)
+
+    assert report["summary"]["present_references"] == 1
+    assert report["summary"]["missing_references"] == 1
+
+
+def test_distinct_redacted_absolute_paths_have_distinct_grouping_keys(tmp_path):
+    dataset = tmp_path / "dataset"
+    first = str(tmp_path / "private-a" / "track.wav")
+    second = str(tmp_path / "private-b" / "track.wav")
+    write_manifest(dataset, [missing_row(first), missing_row(second)])
+
+    report = analyze(dataset, tmp_path)
+
+    assert {row["original_reference_path"] for row in report["records"]} == {
+        "<absolute path redacted>"
+    }
+    assert report["summary"]["unique_missing_paths"] == 2
+    assert len({row["missing_path_fingerprint"] for row in report["records"]}) == 2
+
+
+def test_normalized_equivalent_paths_share_missing_path_group(tmp_path):
+    dataset = tmp_path / "dataset"
+    write_manifest(dataset, [
+        missing_row("  Raga\\missing.wav  ", recording_id="first"),
+        missing_row("Raga/missing.wav", recording_id="second"),
+    ])
+
+    report = analyze(dataset, tmp_path)
+
+    assert report["summary"]["unique_missing_paths"] == 1
+    assert report["records"][0]["missing_path_fingerprint"] == report["records"][1]["missing_path_fingerprint"]
+
+
+@pytest.mark.parametrize(
+    ("reference", "path_type", "expected_normalized"),
+    [
+        ("  Raga\\track.wav  ", "relative", "Raga/track.wav"),
+        (r"C:\\private\\track.wav", "absolute", None),
+        ("file:///private/audio/track.wav", "absolute", None),
+        ("Raga//nested/../track [ü].wav", "relative", "Raga/nested/../track [ü].wav"),
+        ("", "missing", None),
+    ],
+)
+def test_path_normalization_edge_cases(tmp_path, reference, path_type, expected_normalized):
+    dataset = tmp_path / "dataset"
+    write_manifest(dataset, [missing_row(reference)])
+
     record = analyze(dataset, tmp_path)["records"][0]
 
-    assert record["forensic_classification"] == "source_record_available_audio_missing"
-    assert record["evidence_strength"] == "manifest_source_metadata"
+    assert record["reference_path_type"] == path_type
+    assert record["normalized_reference_path"] == expected_normalized
+    if path_type == "absolute":
+        assert record["original_reference_path"] == "<absolute path redacted>"
+    if path_type == "missing":
+        assert record["path_resolution_error"] == "missing audio path"
+
+
+def test_report_discloses_search_exclusions_and_bounds_unresolved_claim(tmp_path):
+    dataset = tmp_path / "dataset"
+    write_manifest(dataset, [missing_row("missing.wav")])
+    report = analyze(dataset, tmp_path)
+    markdown = render_forensics_markdown(report)
+
+    exclusions = report["candidate_analysis"]["excluded_directory_names"]
+    assert {".git", ".venv", ".cache", "build", "reports"}.issubset(exclusions)
+    assert "excluded locations and upstream availability were not checked" in report["classification_definitions"]["unresolved"]
+    assert "Excluded directory names" in markdown
+    assert "does not decode, load, or hash" in " ".join(report["limitations"]).lower()
 
 
 def test_same_source_id_different_chunk_is_only_possible_segment(tmp_path):
