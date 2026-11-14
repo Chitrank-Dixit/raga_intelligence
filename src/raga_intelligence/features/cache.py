@@ -64,7 +64,7 @@ def compute_manifest_content_fingerprint(
 
     Requires a valid audio SHA-256 for every item and excludes machine-specific paths.
     """
-    sorted_items = sorted(items, key=lambda x: (x.recording_id, x.split, x.source, x.performance_id or ""))
+    sorted_items = sorted(items, key=lambda x: (x.recording_id, x.split, x.source or "", x.performance_id or ""))
     descriptors: List[str] = []
 
     for it in sorted_items:

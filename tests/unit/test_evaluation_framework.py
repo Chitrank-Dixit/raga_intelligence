@@ -154,6 +154,7 @@ def test_group_aware_partitioner():
                     raga=raga,
                     performer=perf_id,
                     performance_id=perf_id,
+                    performance_identity_source="manual_review",
                     duration_sec=10.0,
                     sample_rate=24000,
                     split="train",

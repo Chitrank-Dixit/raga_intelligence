@@ -105,6 +105,11 @@ The initial research cohort covers 10 representative Hindustani ragas across div
 
 ## 7. Research Datasets & Licensing
 
+Dataset record fields and provenance semantics are defined in
+[`docs/dataset_metadata_contract.md`](docs/dataset_metadata_contract.md). The
+read-only dataset quality audit is documented in
+[`docs/dataset_audit.md`](docs/dataset_audit.md).
+
 - **Hindustani Raag Corpus**: 390 authentic recordings across 10 canonical ragas (`neerajaabhyankar/hindustani-raag-small`) with ground-truth hand-annotated Sa tonic (Hz). Partitioned with 0% recording leakage (360 train, 30 held-out test).
 - **Saraga Hindustani**: Zenodo DOI `10.5281/zenodo.4301737` (CC BY-NC-SA 4.0).
 - **CompMusic IAM Features**: Zenodo DOI `10.5281/zenodo.7278505` (CC BY-NC-ND 4.0).
@@ -114,7 +119,7 @@ The initial research cohort covers 10 representative Hindustani ragas across div
 
 ## 8. Empirical Benchmark Results
 
-Benchmark execution revision: clean commit `6eec1891715ba79e1bd607b058fc8c3426c02c76` (evaluation `9fedf9990c3d4576952a49b0999b9876`). The PR branch HEAD before this final review change set is `71902a2802eca91dcdf721f17af7c58f89a0ff84`; the benchmark is not claimed as having run on that HEAD or on the current uncommitted changes. Dataset audio-inclusive fingerprint: `252c55be0ff9dc4375bd38d796ffe5fa33ea43a28cd0daac2b1a6e4eaf88c823` (`audio_sha256_v1`); split fingerprint: `b5ba9f621f933b29b76fe0909fa99fa37ced8cc10626d8c2f0a169c91f54f171`. The corpus has 390 clips (360 train / 30 held-out), 82 performance/source groups and 10 test performance clusters. Recording and performance isolation are verified; performer isolation is **not verifiable** because artist metadata is absent. These are not artist-independent results.
+Benchmark execution revision: clean commit `6eec1891715ba79e1bd607b058fc8c3426c02c76` (evaluation `9fedf9990c3d4576952a49b0999b9876`). The PR branch HEAD before this final review change set is `71902a2802eca91dcdf721f17af7c58f89a0ff84`; the benchmark is not claimed as having run on that HEAD or on the current uncommitted changes. Dataset audio-inclusive fingerprint: `252c55be0ff9dc4375bd38d796ffe5fa33ea43a28cd0daac2b1a6e4eaf88c823` (`audio_sha256_v1`); split fingerprint: `b5ba9f621f933b29b76fe0909fa99fa37ced8cc10626d8c2f0a169c91f54f171`. The corpus has 390 clips (360 train / 30 held-out), 82 performance/source grouping IDs and 10 held-out grouping clusters. Recording isolation and non-overlap of those grouping keys were verified. The IDs were filename-derived, so independent performance identity verification is **not verifiable**; performer isolation is also **not verifiable** because artist metadata is absent. These are not artist-independent results.
 
 | Model | Macro-F1 (mean +/- seed SD) | Accuracy (mean +/- seed SD) | Evaluation configuration |
 | :--- | :---: | :---: | :--- |
@@ -149,6 +154,9 @@ python scripts/evaluate.py "path/to/song.mp3" --top-k 5
 
 # Run cross-genre evaluation benchmark
 python scripts/evaluate_cross_genre.py
+
+# Audit the configured Hindustani dataset without modifying it
+python scripts/audit_dataset.py
 
 # Train baseline SVM on Hindustani dataset
 python scripts/train.py --dataset hindustani --model baseline --classifier-type svm

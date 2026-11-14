@@ -43,6 +43,7 @@ artifacts/models/
 
 # Reports and Visualizations output
 reports/figures/
+reports/dataset_audit/
 reports/*.png
 reports/*.svg
 reports/*.pdf

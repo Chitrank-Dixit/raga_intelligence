@@ -305,7 +305,7 @@ def _assert_no_split_leakage(manifest: DatasetManifest) -> None:
     if val["performer_isolation_status"] == "failed":
         raise ValueError(f"Fatal dataset leakage: performers found in multiple splits: {val['leaked_performers']}")
     if val["performer_isolation_status"] == "not_verifiable":
-        logger.warning("Performer-level leakage is not verifiable because artist metadata is incomplete")
+        logger.warning("Performer-level leakage is not verifiable because stable performer IDs are incomplete")
 
 
 def train_baseline_pipeline(

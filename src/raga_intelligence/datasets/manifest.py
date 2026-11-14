@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _known_identity(value: Optional[str]) -> bool:
@@ -49,21 +49,64 @@ def _performance_key(item: "DatasetItem") -> str:
 
 
 class DatasetItem(BaseModel):
-    """Metadata record for a single audio recording."""
+    """Versioned metadata for one recording; absent provenance remains unknown."""
     recording_id: str
-    source: str
+    source: Optional[str] = None
     file_path: str
     raga: str
     tradition: str = "Hindustani"
     performer: Optional[str] = None
+    performer_id: Optional[str] = None
     performance_id: Optional[str] = None
-    duration_sec: float = Field(ge=0.0)
+    performance_identity_source: Literal[
+        "metadata", "filename_pattern", "manual_review", "unknown"
+    ] = "unknown"
+    duration_sec: float = Field(gt=0.0, allow_inf_nan=False)
     sample_rate: int = Field(gt=0)
-    tonic_hz: Optional[float] = None
+    tonic_hz: Optional[float] = Field(default=None, gt=0.0, allow_inf_nan=False)
     split: Literal["train", "val", "test"] = "train"
-    license: str = "CC BY-NC-SA 4.0"
+    # No default license: older records without an explicit value are unknown.
+    license: Optional[str] = None
+    source_recording_id: Optional[str] = None
+    source_url: Optional[str] = None
+    license_url: Optional[str] = None
+    attribution: Optional[str] = None
+    rights_status: Literal["verified", "pending", "restricted", "unknown"] = "unknown"
+    raw_raga_label: Optional[str] = None
+    annotation_status: Optional[Literal["pending", "reviewed", "accepted", "rejected"]] = None
+    annotation_confidence: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0, allow_inf_nan=False
+    )
+    annotation_notes: Optional[str] = None
+    record_status: Literal[
+        "legacy", "candidate", "accepted", "quarantined", "rejected"
+    ] = "legacy"
+    metadata_schema_version: str = "1.0"
     metadata: Dict[str, str] = Field(default_factory=dict)
     audio_sha256: Optional[str] = None
+
+    @field_validator("recording_id", "file_path", "raga", "metadata_schema_version")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be empty or whitespace")
+        return value
+
+    @field_validator("audio_sha256")
+    @classmethod
+    def validate_audio_sha256(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None:
+            import re
+
+            if not re.fullmatch(r"[0-9a-fA-F]{64}", value):
+                raise ValueError("audio_sha256 must be a 64-character hexadecimal SHA-256")
+        return value.lower() if value else value
+
+    @model_validator(mode="after")
+    def validate_performance_identity_source(self) -> "DatasetItem":
+        if self.performance_identity_source != "unknown" and not _known_identity(self.performance_id):
+            raise ValueError("performance_id is required when its identity source is known")
+        return self
 
 
 class DatasetManifest(BaseModel):
@@ -95,16 +138,21 @@ class DatasetManifest(BaseModel):
         perf_leakage = (train_perfs & val_perfs) | (train_perfs & test_perfs) | (val_perfs & test_perfs)
 
         # 3. Performer-level checks
-        train_performers = {it.performer for it in train_items if _known_identity(it.performer)}
-        val_performers = {it.performer for it in val_items if _known_identity(it.performer)}
-        test_performers = {it.performer for it in test_items if _known_identity(it.performer)}
+        train_performers = {it.performer_id for it in train_items if _known_identity(it.performer_id)}
+        val_performers = {it.performer_id for it in val_items if _known_identity(it.performer_id)}
+        test_performers = {it.performer_id for it in test_items if _known_identity(it.performer_id)}
         performer_leakage = (train_performers & val_performers) | (train_performers & test_performers) | (val_performers & test_performers)
 
         # 4. Metadata completeness check
-        unknown_performer_count = sum(1 for it in self.items if not _known_identity(it.performer))
+        unknown_performer_count = sum(1 for it in self.items if not _known_identity(it.performer_id))
         unknown_performance_count = sum(1 for it in self.items if not _known_identity(it.performance_id))
         performer_metadata_complete = (unknown_performer_count == 0)
         performance_metadata_complete = (unknown_performance_count == 0)
+        performance_identity_verified = bool(self.items) and all(
+            _known_identity(it.performance_id)
+            and it.performance_identity_source == "manual_review"
+            for it in self.items
+        )
 
         split_summary = {
             "recordings_count": {
@@ -128,6 +176,7 @@ class DatasetManifest(BaseModel):
             "raga_distribution": self.get_class_counts(),
             "performer_metadata_complete": performer_metadata_complete,
             "performance_metadata_complete": performance_metadata_complete,
+            "performance_identity_verified": performance_identity_verified,
             "unknown_performer_count": unknown_performer_count,
             "unknown_performance_count": unknown_performance_count,
         }
@@ -136,7 +185,12 @@ class DatasetManifest(BaseModel):
         recording_metadata_complete = all(_known_identity(it.recording_id) for it in self.items)
         recording_isolation_status = _isolation_status(bool(rec_leakage), recording_metadata_complete)
         performer_isolation_status = _isolation_status(bool(performer_leakage), performer_metadata_complete)
-        performance_isolation_status = _isolation_status(bool(perf_leakage), performance_metadata_complete)
+        performance_grouping_isolation_status = _isolation_status(
+            bool(perf_leakage), performance_metadata_complete
+        )
+        performance_isolation_status = _isolation_status(
+            bool(perf_leakage), performance_identity_verified
+        )
 
         return {
             "valid_no_recording_leakage": len(rec_leakage) == 0,
@@ -146,12 +200,17 @@ class DatasetManifest(BaseModel):
             "is_performer_isolation_verified": performer_isolation_status == "verified",
             "is_performance_isolation_verified": performance_isolation_status == "verified",
             "performer_isolation_status": performer_isolation_status,
+            "performance_grouping_isolation_status": performance_grouping_isolation_status,
+            "performance_grouping_isolation_verifiable": (
+                performance_grouping_isolation_status == "verified"
+            ),
             "performance_isolation_status": performance_isolation_status,
             "leaked_recordings": sorted(list(rec_leakage)),
             "leaked_performances": sorted(list(perf_leakage)),
             "leaked_performers": sorted(list(performer_leakage)),
             "performer_metadata_complete": performer_metadata_complete,
             "performance_metadata_complete": performance_metadata_complete,
+            "performance_identity_verified": performance_identity_verified,
             "unknown_performer_count": unknown_performer_count,
             "unknown_performance_count": unknown_performance_count,
             "train_recordings_count": len(train_ids),
@@ -195,6 +254,59 @@ class DatasetManifest(BaseModel):
             for it in sorted_items
         ]
         return hashlib.sha256("|".join(descriptors).encode("utf-8")).hexdigest()
+
+    def compute_metadata_fingerprint_v2(self) -> str:
+        """Fingerprint the expanded metadata contract under an explicit new policy."""
+        descriptors = sorted(
+            json.dumps(
+                {
+                    "recording_id": item.recording_id,
+                    "split": item.split,
+                    "raga": item.raga,
+                    "raw_raga_label": item.raw_raga_label,
+                    "tonic_hz": item.tonic_hz,
+                    "tradition": item.tradition,
+                    "performer": item.performer,
+                    "performer_id": item.performer_id,
+                    "performance_id": item.performance_id,
+                    "performance_identity_source": item.performance_identity_source,
+                    "duration_sec": item.duration_sec,
+                    "sample_rate": item.sample_rate,
+                    "source": item.source,
+                    "source_recording_id": item.source_recording_id,
+                    "source_url": item.source_url,
+                    "license": item.license,
+                    "license_url": item.license_url,
+                    "attribution": item.attribution,
+                    "rights_status": item.rights_status,
+                    "annotation_status": item.annotation_status,
+                    "annotation_confidence": item.annotation_confidence,
+                    "annotation_notes": item.annotation_notes,
+                    "record_status": item.record_status,
+                    "metadata_schema_version": item.metadata_schema_version,
+                    "metadata": item.metadata,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            for item in self.items
+        )
+        return hashlib.sha256("|".join(descriptors).encode("utf-8")).hexdigest()
+
+    def compute_dataset_fingerprint_v2(self) -> str:
+        """Content fingerprint using expanded metadata and audio SHA-256 (policy v2)."""
+        self._require_audio_hashes()
+        self.populate_audio_hashes(force_recompute=True)
+        payload = json.dumps(
+            {
+                "fingerprint_policy": "audio_sha256_metadata_v2",
+                "metadata_fingerprint": self.compute_metadata_fingerprint_v2(),
+                "audio_content_fingerprint": self._audio_content_fingerprint_from_hashes(),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def populate_audio_hashes(self, force_recompute: bool = False) -> None:
         """
