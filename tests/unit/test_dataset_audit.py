@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 import numpy as np
+import pytest
 import soundfile as sf
 
 from raga_intelligence.config import RAGA_LIST
@@ -238,6 +239,96 @@ def test_missing_performance_and_performer_identity_remain_unknown(tmp_path):
     assert result["evaluation_readiness"]["performer_isolation_status"] == "not_verifiable"
 
 
+@pytest.mark.parametrize("ambiguous_field", ["performance", "source_id", "video_id"])
+def test_ambiguous_performance_columns_do_not_create_verified_identity(
+    tmp_path, ambiguous_field
+):
+    rows = valid_rows(tmp_path)
+    for row in rows:
+        row.pop("performance_id")
+        row["performance_identity_source"] = " MANUAL_REVIEW "
+        row[ambiguous_field] = "Shared descriptive value"
+        row["file_name"] = f"plain_{row['recording_id']}.wav"
+        write_audio(tmp_path / row["file_name"])
+    fields = [field for field in CSV_FIELDS if field != "performance_id"] + [ambiguous_field]
+    write_manifest(tmp_path, rows, fields)
+
+    result = audit_dataset(tmp_path)
+
+    readiness = result["evaluation_readiness"]
+    assert readiness["missing_performance_id_count"] == len(rows)
+    assert readiness["performance_identity_verification_status"] == "not_verifiable"
+    assert readiness["scientific_evaluation_ready"] is False
+    assert result["identity_coverage"]["performance"]["identity_source_counts"] == {
+        "unknown": len(rows)
+    }
+    for record in result["records"]:
+        assert record["performance_identity_source_claim"] == "manual_review"
+        assert record["ambiguous_performance_metadata"][ambiguous_field] == "Shared descriptive value"
+
+
+def test_documented_concert_id_is_accepted_without_manual_verification(tmp_path):
+    rows = valid_rows(tmp_path)
+    for index, row in enumerate(rows):
+        row.pop("performance_id")
+        row["concert_id"] = f"concert-{index}"
+        row["performance_identity_source"] = "metadata"
+    fields = [field for field in CSV_FIELDS if field != "performance_id"] + ["concert_id"]
+    write_manifest(tmp_path, rows, fields)
+
+    result = audit_dataset(tmp_path)
+
+    assert result["records"][0]["performance_id"] == "concert-0"
+    assert result["records"][0]["performance_identity_source"] == "metadata"
+    assert result["evaluation_readiness"]["performance_grouping_split_isolation_status"] == "verified"
+    assert result["evaluation_readiness"]["performance_identity_verification_status"] == "not_verifiable"
+
+
+def test_same_performance_and_album_titles_do_not_merge_distinct_explicit_ids(tmp_path):
+    rows = valid_rows(tmp_path)
+    for row in rows[:2]:
+        row["performance"] = "Same descriptive title"
+        row["album"] = "Shared album title"
+    write_manifest(tmp_path, rows, [*CSV_FIELDS, "performance", "album"])
+
+    result = audit_dataset(tmp_path)
+
+    assert result["records"][0]["performance_id"] != result["records"][1]["performance_id"]
+    assert result["identity_coverage"]["performance"]["unique_performances"] == 20
+    assert result["evaluation_readiness"]["performance_grouping_split_isolation_status"] == "verified"
+    assert result["records"][0]["ambiguous_performance_metadata"] == {
+        "performance": "Same descriptive title",
+        "album": "Shared album title",
+    }
+
+
+def test_explicit_performance_id_normalizes_whitespace_and_manual_review_source(tmp_path):
+    rows = valid_rows(tmp_path)
+    rows[0]["performance_id"] = "  reviewed-performance  "
+    rows[0]["performance_identity_source"] = " MANUAL_REVIEW "
+    write_manifest(tmp_path, rows)
+
+    result = audit_dataset(tmp_path)
+
+    assert result["records"][0]["performance_id"] == "reviewed-performance"
+    assert result["records"][0]["performance_identity_source"] == "manual_review"
+
+
+def test_empty_canonical_id_cannot_be_upgraded_by_source_claim_or_filename(tmp_path):
+    rows = valid_rows(tmp_path)
+    rows[0]["performance_id"] = "   "
+    rows[0]["performance_identity_source"] = " MANUAL_REVIEW "
+    write_manifest(tmp_path, rows)
+
+    result = audit_dataset(tmp_path)
+
+    record = result["records"][0]
+    assert record["performance_id"] is None
+    assert record["performance_identity_source"] == "unknown"
+    assert record["performance_identity_source_claim"] == "manual_review"
+    assert result["evaluation_readiness"]["performance_identity_verification_status"] == "not_verifiable"
+
+
 def test_filename_performance_rule_is_disclosed_and_never_populates_performer(tmp_path):
     rows = valid_rows(tmp_path)
     for row in rows:
@@ -245,9 +336,16 @@ def test_filename_performance_rule_is_disclosed_and_never_populates_performer(tm
         row.pop("performance_identity_source")
         row["performer"] = "unknown"
         row["performer_id"] = "unknown"
+        row["performance"] = "A descriptive concert title"
+        row["source_id"] = f"source-{row['recording_id']}"
+        row["video_id"] = f"video-{row['recording_id']}"
+    rows[0]["performance_identity_source"] = " MANUAL_REVIEW "
     write_manifest(
         tmp_path, rows,
-        [field for field in CSV_FIELDS if field not in {"performance_id", "performance_identity_source"}],
+        [
+            field for field in CSV_FIELDS
+            if field != "performance_id"
+        ] + ["performance", "source_id", "video_id"],
     )
 
     result = audit_dataset(tmp_path)
@@ -263,6 +361,13 @@ def test_filename_performance_rule_is_disclosed_and_never_populates_performer(tm
     }
     assert result["identity_coverage"]["performer"]["missing_count"] == 20
     assert all(record["performer_id"] is None for record in result["records"])
+    assert result["records"][0]["ambiguous_performance_metadata"] == {
+        "performance": "A descriptive concert title",
+        "source_id": f"source-{rows[0]['recording_id']}",
+        "video_id": f"video-{rows[0]['recording_id']}",
+    }
+    assert result["records"][0]["performance_identity_source_claim"] == "manual_review"
+    assert result["records"][0]["performance_identity_source"] == "filename_pattern"
 
 
 def test_performance_leakage_across_splits_is_reported(tmp_path):

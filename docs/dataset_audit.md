@@ -19,6 +19,15 @@ present but empty or unknown identity field remains unknown. Performer IDs are
 read only from explicit `performer_id` or `artist_id` columns; display names are
 reported separately and never treated as performer identities.
 
+Only `performance_id` and the `concert_id` documented in
+[`dataset_metadata_contract.md`](dataset_metadata_contract.md) are read as
+explicit performance identity fields. `performance`, `source_id`, `video_id`,
+album/release/work, and composition fields are retained as ambiguous source
+metadata in each record but are never promoted to performance IDs. A
+`manual_review` source claim is applied only when an accepted explicit
+performance identifier is present; filename grouping and ambiguous fields
+cannot upgrade it.
+
 Missing referenced files, unreadable audio, duplicate recording IDs, invalid
 annotations, leakage, and incomplete canonical train/test coverage are errors
 and give the CLI a nonzero status. Missing performer or rights/provenance fields

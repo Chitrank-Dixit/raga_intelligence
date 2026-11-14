@@ -19,7 +19,10 @@ from raga_intelligence.config import CANONICAL_RAGAS
 from raga_intelligence.datasets.hindustani_dataset import CANONICAL_NAME_MAP
 
 IDENTITY_UNKNOWN = {"", "unknown", "none", "null"}
-PERFORMANCE_COLUMNS = ("performance_id", "performance", "source_id", "video_id")
+PERFORMANCE_COLUMNS = ("performance_id", "concert_id")
+AMBIGUOUS_PERFORMANCE_METADATA_COLUMNS = (
+    "performance", "source_id", "video_id", "concert", "album", "release", "work", "composition"
+)
 PERFORMER_COLUMNS = ("performer_id", "artist_id")
 PERFORMER_DISPLAY_COLUMNS = ("performer", "artist", "lead_artist")
 SOURCE_COLUMNS = ("source", "dataset_source", "source_collection", "collection")
@@ -349,12 +352,29 @@ def audit_dataset(
 
         license_value = _first_value(row, LICENSE_COLUMNS)
         rights_value = _first_controlled_value(row, ("rights_status", "license_status"))
-        performance_identity_source = _first_controlled_value(
+        performance_identity_source_claim = _first_controlled_value(
             row, ("performance_identity_source",)
         )
-        if performance_identity_source is None:
-            performance_identity_source = performance_origin
-        performance_identity_source = performance_identity_source.strip().lower()
+        if performance_identity_source_claim is not None:
+            performance_identity_source_claim = performance_identity_source_claim.strip().lower()
+        if performance_origin == "filename_pattern":
+            # A source claim cannot upgrade a filename-derived group key to a
+            # reviewed or source-metadata performance identity.
+            performance_identity_source = "filename_pattern"
+        elif performance_origin == "metadata":
+            performance_identity_source = performance_identity_source_claim or "metadata"
+        else:
+            performance_identity_source = "unknown"
+        if (
+            performance_identity_source_claim == "manual_review"
+            and performance_origin != "metadata"
+        ):
+            issue_counts["unapplied_performance_review_claim"] += 1
+        ambiguous_performance_metadata = {
+            field: _safe_source_reference(str(row[field]).strip())
+            for field in AMBIGUOUS_PERFORMANCE_METADATA_COLUMNS
+            if field in row and row[field] is not None and str(row[field]).strip()
+        }
         detail = {
             "metadata_row": index,
             "recording_id": recording_id,
@@ -368,9 +388,11 @@ def audit_dataset(
             "split_identity_source": split_origin,
             "performance_id": performance_id,
             "performance_identity_source": performance_identity_source,
+            "performance_identity_source_claim": performance_identity_source_claim,
             "performance_identity_reliability": PERFORMANCE_IDENTITY_RELIABILITY.get(
                 performance_identity_source, "unknown"
             ),
+            "ambiguous_performance_metadata": ambiguous_performance_metadata,
             "performer_id": performer_id,
             "performer_display_name": performer_display_name,
             "audio": audio,
@@ -543,6 +565,15 @@ def audit_dataset(
             "severity": "WARNING",
             "code": "performance_identity_not_independently_verified",
             "message": "Performance IDs do not have manual-review evidence; non-overlapping grouping IDs alone do not verify performance identity.",
+        })
+    if issue_counts["unapplied_performance_review_claim"]:
+        issues.append({
+            "severity": "WARNING",
+            "code": "performance_review_claim_without_explicit_id",
+            "message": (
+                f"{issue_counts['unapplied_performance_review_claim']} record(s) claim manual review "
+                "without an accepted performance_id or concert_id; the claim was not applied."
+            ),
         })
     if issue_counts["missing_performer_id"]:
         issues.append({"severity": "WARNING", "code": "performer_isolation_unverifiable", "message": f"{issue_counts['missing_performer_id']} record(s) lack performer metadata; performer-held-out generalization cannot be claimed."})
