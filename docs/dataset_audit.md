@@ -55,3 +55,30 @@ schema and lifecycle values remain visible as missing; auditing does not assign
 legacy/accepted or rights statuses to the CSV records. See
 [`dataset_metadata_contract.md`](dataset_metadata_contract.md) for the shared
 `DatasetItem` contract and the explicit metadata fingerprint v2 policy.
+
+## Missing-reference forensics
+
+Run `python scripts/analyze_missing_audio_references.py` to investigate each
+missing reference in the configured `DATA_DIR/hindustani_dataset` manifest.
+Use `--dataset-dir`, `--metadata-file`, and `--search-root` to select the
+dataset, CSV, and local filesystem tree to inspect. By default, local candidate
+search is limited to the project root and excludes Git metadata, Python
+environments/caches, pytest scratch directories, and generated report
+directories. `--output-dir` defaults to the ignored `reports/dataset_audit/`
+directory and must remain outside the dataset root.
+
+The command reuses the audit's path-resolution behavior and reports one JSON
+result per missing manifest row, plus aggregate Markdown. Classifications such
+as `alternate_local_location_candidate` and `possible_segment_reference` are
+evidence labels for human review; neither a similar filename nor a shared
+filename-derived ID proves recording identity. Evidence is recorded separately
+from classification. The report distinguishes exact filename, normalized path,
+explicit source-ID, chunk-sibling, and filename-similarity evidence. An
+unresolved result is retained when no local explanation is supported. Absolute
+manifest paths are redacted in reports. Repository commit, source-tree
+cleanliness, and the source-tree fingerprint are included for reproducibility.
+
+This analysis only reads the manifest and local filesystem. It does not decode,
+copy, recover, or modify audio; edit metadata; access external sources; or infer
+licenses, identities, or rights. It does not change the existing audit's
+duplicate-content definition.
