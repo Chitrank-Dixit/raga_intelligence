@@ -121,6 +121,7 @@ def test_manifest_performer_and_performance_leakage_detection():
             performer="Ustad A",
             performer_id="artist-a",
             performance_id="perf_01",
+            performance_identity_source="manual_review",
             duration_sec=10.0,
             sample_rate=24000,
             split="train",
@@ -135,6 +136,7 @@ def test_manifest_performer_and_performance_leakage_detection():
             performer="Pandit B",
             performer_id="artist-b",
             performance_id="perf_02",
+            performance_identity_source="manual_review",
             duration_sec=10.0,
             sample_rate=24000,
             split="test",
@@ -225,6 +227,52 @@ def test_incomplete_metadata_cannot_pass_legacy_leakage_booleans():
     assert audit["valid_no_performance_leakage"] is False
 
 
+def test_recording_fallback_is_not_verified_performance_identity():
+    manifest = DatasetManifest(items=[
+        DatasetItem(
+            recording_id="recording-1", source="SaragaTest", file_path="one.wav",
+            raga="Bhairav", performance_id="recording-1", performance_identity_source="unknown",
+            duration_sec=1.0, sample_rate=24000, split="train",
+        ),
+        DatasetItem(
+            recording_id="recording-2", source="SaragaTest", file_path="two.wav",
+            raga="Yaman", performance_id="recording-2", performance_identity_source="unknown",
+            duration_sec=1.0, sample_rate=24000, split="test",
+        ),
+    ])
+
+    validation = manifest.validate_splits()
+
+    assert validation["performance_metadata_complete"] is True
+    assert validation["performance_grouping_isolation_status"] == "verified"
+    assert validation["performance_identity_verified"] is False
+    assert validation["performance_isolation_status"] == "not_verifiable"
+    assert validation["valid_no_performance_leakage"] is False
+
+
+def test_reviewed_performance_metadata_can_be_verified():
+    manifest = DatasetManifest(items=[
+        DatasetItem(
+            recording_id="recording-1", source="fixture", file_path="one.wav",
+            raga="Bhairav", performance_id="performance-1",
+            performance_identity_source="manual_review", duration_sec=1.0,
+            sample_rate=24000, split="train",
+        ),
+        DatasetItem(
+            recording_id="recording-2", source="fixture", file_path="two.wav",
+            raga="Yaman", performance_id="performance-2",
+            performance_identity_source="manual_review", duration_sec=1.0,
+            sample_rate=24000, split="test",
+        ),
+    ])
+
+    validation = manifest.validate_splits()
+
+    assert validation["performance_identity_verified"] is True
+    assert validation["performance_grouping_isolation_status"] == "verified"
+    assert validation["performance_isolation_status"] == "verified"
+
+
 def test_split_summary_and_class_distribution():
     manifest = DatasetManifest()
     manifest.add_item(
@@ -302,6 +350,7 @@ def test_saraga_deterministic_group_partition():
                     performer=performer,
                     performer_id=f"artist-{idx}",
                     performance_id=f"perf_{idx}",
+                    performance_identity_source="manual_review",
                     duration_sec=10.0,
                     sample_rate=24000,
                     split="train",
@@ -374,6 +423,123 @@ def test_saraga_performer_identity_requires_explicit_stable_source_id():
     assert performer_id == "source-artist-42"
 
 
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        ({"performance_id": "explicit-performance"}, ("explicit-performance", "metadata")),
+        (
+            {"performance": {"id": "performance-42", "title": "Evening Concert"}},
+            ("performance-42", "metadata"),
+        ),
+        (
+            {"concert": {"id": "concert-9", "title": "Live at Hall"}},
+            ("concert-9", "metadata"),
+        ),
+        ({"performance": {"title": "Evening Concert"}}, ("recording-1", "unknown")),
+        ({"performance_id": {"title": "Not an ID"}}, ("recording-1", "unknown")),
+        ({"concert": {"title": "Live at Hall"}}, ("recording-1", "unknown")),
+        ({"album": {"id": "album-id", "title": "Shared Album"}}, ("recording-1", "unknown")),
+        ({"release": {"id": "release-id", "title": "Shared Release"}}, ("recording-1", "unknown")),
+        ({"work": {"id": "work-id", "title": "Composition"}}, ("recording-1", "unknown")),
+        ({"composition": {"title": "Composition"}}, ("recording-1", "unknown")),
+        ({"concert": "Concert title"}, ("recording-1", "unknown")),
+        ({}, ("recording-1", "unknown")),
+    ],
+)
+def test_saraga_performance_identity_uses_only_explicit_performance_ids(metadata, expected):
+    from raga_intelligence.datasets.saraga import _extract_performance_identity
+
+    assert _extract_performance_identity(metadata, "recording-1") == expected
+
+
+def test_saraga_performance_object_id_wins_and_album_titles_do_not_group():
+    from raga_intelligence.datasets.saraga import _extract_performance_identity
+
+    first = _extract_performance_identity(
+        {"performance": {"id": "performance-1", "title": "Same Album Tour"}, "album": "Shared"},
+        "recording-1",
+    )
+    second = _extract_performance_identity(
+        {"performance": {"id": "performance-2", "title": "Same Album Tour"}, "album": "Shared"},
+        "recording-2",
+    )
+
+    assert first == ("performance-1", "metadata")
+    assert second == ("performance-2", "metadata")
+    assert first[0] != second[0]
+
+
+def test_saraga_adapter_keeps_titles_as_descriptions_and_uses_recording_fallback(tmp_path):
+    import json
+
+    from raga_intelligence.datasets.saraga import SaragaHindustaniAdapter
+
+    records = {
+        "title-only": {
+            "raag": "Bhairav",
+            "performance": {"title": "Evening Concert"},
+            "album": {"title": "Shared Album"},
+            "lead_artist": {"name": "Display Only Artist"},
+            "duration": 1.0,
+            "sample_rate": 24000,
+        },
+        "explicit-id": {
+            "raag": "Yaman",
+            "concert": {"id": "concert-81", "title": "Morning Concert"},
+            "release": {"title": "Shared Release"},
+            "duration": 1.0,
+            "sample_rate": 24000,
+        },
+    }
+    records.update({
+        f"album-only-{index}": {
+            "raag": "Bhairav",
+            "album": {"title": "One Shared Album"},
+            "duration": 1.0,
+            "sample_rate": 24000,
+        }
+        for index in range(8)
+    })
+    for recording_id, metadata in records.items():
+        (tmp_path / f"{recording_id}.json").write_text(
+            json.dumps(metadata), encoding="utf-8"
+        )
+        (tmp_path / f"{recording_id}.wav").write_bytes(b"fixture audio")
+
+    manifest = SaragaHindustaniAdapter(dataset_dir=tmp_path, seed=42).build_manifest()
+    by_recording = {item.recording_id: item for item in manifest.items}
+
+    assert by_recording["title-only"].performance_id == "title-only"
+    assert by_recording["title-only"].performance_identity_source == "unknown"
+    assert by_recording["title-only"].performer == "Display Only Artist"
+    assert by_recording["title-only"].performer_id is None
+    assert by_recording["explicit-id"].performance_id == "concert-81"
+    assert by_recording["explicit-id"].performance_identity_source == "metadata"
+    album_only = [item for item in manifest.items if item.recording_id.startswith("album-only-")]
+    assert len({item.split for item in album_only}) > 1
+    validation = manifest.validate_splits()
+    assert validation["performance_isolation_status"] == "not_verifiable"
+
+
+def test_saraga_fallback_identity_source_survives_manifest_json_roundtrip():
+    from raga_intelligence.datasets.saraga import _extract_performance_identity
+
+    fallback_id, identity_source = _extract_performance_identity({"album": "Shared"}, "recording-1")
+    manifest = DatasetManifest(items=[
+        DatasetItem(
+            recording_id="recording-1", source="SaragaTest", file_path="one.wav",
+            raga="Bhairav", performance_id=fallback_id,
+            performance_identity_source=identity_source, duration_sec=1.0, sample_rate=24000,
+        )
+    ])
+
+    restored = DatasetManifest.model_validate_json(manifest.model_dump_json())
+
+    assert restored.items[0].performance_id == "recording-1"
+    assert restored.items[0].performance_identity_source == "unknown"
+    assert restored.validate_splits()["performance_isolation_status"] == "not_verifiable"
+
+
 def test_training_fails_on_leakage():
     from raga_intelligence.training.trainer import _assert_no_split_leakage
 
@@ -420,7 +586,8 @@ def test_hindustani_dataset_adapter():
     assert len(manifest.items) == 390
     validation = manifest.validate_splits()
     assert validation["valid_no_recording_leakage"] is True
-    assert validation["valid_no_performance_leakage"] is True
+    assert validation["valid_no_performance_leakage"] is False
+    assert validation["performance_isolation_status"] == "not_verifiable"
     assert validation["valid_no_performer_leakage"] is False
     assert validation["performer_isolation_status"] == "not_verifiable"
     assert validation["train_recordings_count"] == 360

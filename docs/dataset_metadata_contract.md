@@ -54,8 +54,15 @@ conversion.
   stable identity. No ID is inferred from a display name.
 - `performance_id` is the performance grouping value;
   `performance_identity_source` says whether it came from metadata, the known
-  filename pattern, manual review, or an unknown origin. This source field does
-  not assert independent verification.
+  filename pattern, manual review, or an unknown origin. Only an independently
+  reviewed identity (`manual_review`) is treated as verified by split validation;
+  other IDs can still serve as grouping keys while verification remains
+  `not_verifiable`.
+- The Saraga adapter accepts top-level `performance_id`/`concert_id`, or explicit
+  `performance_id`, `concert_id`, or context-scoped `id` values inside `performance`
+  or `concert` objects. It ignores titles/names and does not use `release`, `album`,
+  `work`, or composition metadata as performance identity. When no accepted ID is
+  present, the recording ID is a grouping fallback with source `unknown`.
 - Annotation status is optional and, when present, is `pending`, `reviewed`,
   `accepted`, or `rejected`. Confidence is optional and constrained to [0, 1].
 

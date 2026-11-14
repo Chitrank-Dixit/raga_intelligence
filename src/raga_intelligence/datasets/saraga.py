@@ -70,8 +70,9 @@ class SaragaHindustaniAdapter(BaseDatasetAdapter):
     def _partition_items(self, parsed_items: List[DatasetItem]) -> List[DatasetItem]:
         """
         Deterministically partitions items into train/val/test using group-based splitting
-        by stable performer ID (or performance/recording ID fallback). Guarantees zero leakage
-        across the available grouping identities; display names are never used as stable IDs.
+        by stable performer ID (or performance/recording ID fallback). Keeps each known
+        grouping key within one split; it cannot verify identity when only a fallback exists.
+        Display names are never used as stable IDs.
         """
         if not parsed_items:
             return []
@@ -211,15 +212,7 @@ class SaragaHindustaniAdapter(BaseDatasetAdapter):
 
                 artist, performer_id = _extract_performer_identity(data)
 
-                perf_id = None
-                for key in ("concert", "performance", "release", "album", "work"):
-                    val = data.get(key)
-                    if val:
-                        perf_id = val.get("title") or val.get("name") or val.get("id") if isinstance(val, dict) else str(val)
-                        break
-                performance_identity_source = "metadata" if perf_id else "unknown"
-                if not perf_id:
-                    perf_id = rec_id
+                perf_id, performance_identity_source = _extract_performance_identity(data, rec_id)
 
                 parsed_items.append(
                     DatasetItem(
@@ -253,7 +246,7 @@ class SaragaHindustaniAdapter(BaseDatasetAdapter):
             except Exception as e:
                 logger.debug(f"Failed parsing metadata file {mfile}: {e}")
 
-        # Deterministic group partition (zero performer & performance leakage)
+        # Deterministic grouping partition; identity verification remains source-dependent.
         partitioned_items = self._partition_items(parsed_items)
         for item in partitioned_items:
             manifest.add_item(item)
@@ -263,13 +256,13 @@ class SaragaHindustaniAdapter(BaseDatasetAdapter):
 
 def _extract_performer_identity(data: dict) -> tuple[Optional[str], Optional[str]]:
     """Return display name and an explicitly supplied stable performer ID, if present."""
-    top_level_identity = _known_text(data.get("performer_id") or data.get("artist_id"))
+    top_level_identity = _known_identifier(data.get("performer_id") or data.get("artist_id"))
     for key in ("lead_artist", "artist"):
         value = data.get(key)
         if isinstance(value, dict):
             name = value.get("name")
             identity = value.get("performer_id") or value.get("artist_id") or value.get("id")
-            return _known_text(name), _known_text(identity) or top_level_identity
+            return _known_text(name), _known_identifier(identity) or top_level_identity
         if value is not None:
             return _known_text(value), top_level_identity
 
@@ -279,7 +272,7 @@ def _extract_performer_identity(data: dict) -> tuple[Optional[str], Optional[str
             if isinstance(value, dict) and (value.get("role") == "lead" or "name" in value):
                 name = value.get("name")
                 identity = value.get("performer_id") or value.get("artist_id") or value.get("id")
-                return _known_text(name), _known_text(identity) or top_level_identity
+                return _known_text(name), _known_identifier(identity) or top_level_identity
             if isinstance(value, str):
                 return _known_text(value), top_level_identity
 
@@ -291,4 +284,35 @@ def _known_text(value: object) -> Optional[str]:
         return None
     text = str(value).strip()
     return text if text.lower() not in {"", "unknown", "none", "null"} else None
+
+
+def _known_identifier(value: object) -> Optional[str]:
+    if isinstance(value, (dict, list, tuple, set)):
+        return None
+    return _known_text(value)
+
+
+def _extract_performance_identity(data: dict, recording_id: str) -> tuple[str, str]:
+    """Read only explicit IDs in performance/concert fields; otherwise use an unknown recording fallback.
+
+    Accepted source fields are top-level ``performance_id``/``concert_id`` and
+    ``id``/those explicit ID keys nested in a ``performance`` or ``concert``
+    object. Titles and names, including release/album/work/composition metadata,
+    are descriptive values and never become performance identities.
+    """
+    for field in ("performance_id", "concert_id"):
+        identity = _known_identifier(data.get(field))
+        if identity:
+            return identity, "metadata"
+
+    for field in ("performance", "concert"):
+        value = data.get(field)
+        if not isinstance(value, dict):
+            continue
+        for id_field in ("performance_id", "concert_id", "id"):
+            identity = _known_identifier(value.get(id_field))
+            if identity:
+                return identity, "metadata"
+
+    return recording_id, "unknown"
 

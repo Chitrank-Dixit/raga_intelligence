@@ -38,6 +38,9 @@ def make_partition_manifest(*, missing_performance_ids=False, performance_leak=F
                 raga=raga,
                 performer=None,
                 performance_id=performance_id,
+                performance_identity_source=(
+                    "unknown" if missing_performance_ids else "manual_review"
+                ),
                 duration_sec=10.0,
                 sample_rate=24000,
                 split="train" if group == 0 else "test",
@@ -113,6 +116,7 @@ def test_infeasible_partition_is_rejected_before_evaluation_cache_or_models(
             raga="Bhairav",
             performer=None,
             performance_id="single_performance",
+            performance_identity_source="manual_review",
             duration_sec=10.0,
             sample_rate=24000,
             split="train",
@@ -150,6 +154,7 @@ def test_scientific_partition_requires_every_raga_in_train_and_test():
             raga=raga,
             performer=f"artist_{raga}_{group}",
             performance_id=f"performance_{raga}_{group}",
+            performance_identity_source="manual_review",
             duration_sec=10.0,
             sample_rate=24000,
             split="train",

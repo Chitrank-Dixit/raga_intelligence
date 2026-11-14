@@ -148,6 +148,11 @@ class DatasetManifest(BaseModel):
         unknown_performance_count = sum(1 for it in self.items if not _known_identity(it.performance_id))
         performer_metadata_complete = (unknown_performer_count == 0)
         performance_metadata_complete = (unknown_performance_count == 0)
+        performance_identity_verified = bool(self.items) and all(
+            _known_identity(it.performance_id)
+            and it.performance_identity_source == "manual_review"
+            for it in self.items
+        )
 
         split_summary = {
             "recordings_count": {
@@ -171,6 +176,7 @@ class DatasetManifest(BaseModel):
             "raga_distribution": self.get_class_counts(),
             "performer_metadata_complete": performer_metadata_complete,
             "performance_metadata_complete": performance_metadata_complete,
+            "performance_identity_verified": performance_identity_verified,
             "unknown_performer_count": unknown_performer_count,
             "unknown_performance_count": unknown_performance_count,
         }
@@ -179,7 +185,12 @@ class DatasetManifest(BaseModel):
         recording_metadata_complete = all(_known_identity(it.recording_id) for it in self.items)
         recording_isolation_status = _isolation_status(bool(rec_leakage), recording_metadata_complete)
         performer_isolation_status = _isolation_status(bool(performer_leakage), performer_metadata_complete)
-        performance_isolation_status = _isolation_status(bool(perf_leakage), performance_metadata_complete)
+        performance_grouping_isolation_status = _isolation_status(
+            bool(perf_leakage), performance_metadata_complete
+        )
+        performance_isolation_status = _isolation_status(
+            bool(perf_leakage), performance_identity_verified
+        )
 
         return {
             "valid_no_recording_leakage": len(rec_leakage) == 0,
@@ -189,12 +200,17 @@ class DatasetManifest(BaseModel):
             "is_performer_isolation_verified": performer_isolation_status == "verified",
             "is_performance_isolation_verified": performance_isolation_status == "verified",
             "performer_isolation_status": performer_isolation_status,
+            "performance_grouping_isolation_status": performance_grouping_isolation_status,
+            "performance_grouping_isolation_verifiable": (
+                performance_grouping_isolation_status == "verified"
+            ),
             "performance_isolation_status": performance_isolation_status,
             "leaked_recordings": sorted(list(rec_leakage)),
             "leaked_performances": sorted(list(perf_leakage)),
             "leaked_performers": sorted(list(performer_leakage)),
             "performer_metadata_complete": performer_metadata_complete,
             "performance_metadata_complete": performance_metadata_complete,
+            "performance_identity_verified": performance_identity_verified,
             "unknown_performer_count": unknown_performer_count,
             "unknown_performance_count": unknown_performance_count,
             "train_recordings_count": len(train_ids),
