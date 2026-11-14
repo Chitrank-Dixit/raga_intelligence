@@ -55,3 +55,70 @@ schema and lifecycle values remain visible as missing; auditing does not assign
 legacy/accepted or rights statuses to the CSV records. See
 [`dataset_metadata_contract.md`](dataset_metadata_contract.md) for the shared
 `DatasetItem` contract and the explicit metadata fingerprint v2 policy.
+
+## Missing-reference forensics
+
+Run `python scripts/analyze_missing_audio_references.py` to investigate each
+missing reference in the configured `DATA_DIR/hindustani_dataset` manifest.
+Use `--dataset-dir`, `--metadata-file`, and `--search-root` to select the
+dataset, CSV, and local filesystem tree to inspect. By default, local candidate
+search is limited to the project root and excludes Git metadata, Python
+environments/caches, pytest scratch directories, and generated report
+directories. `--output-dir` defaults to the ignored `reports/dataset_audit/`
+directory and must remain outside the dataset root.
+
+The command reuses the audit's path-resolution behavior and reports one JSON
+result per missing manifest row, plus aggregate Markdown. Classifications such
+as `alternate_local_location_candidate` and `possible_segment_reference` are
+evidence labels for human review; neither a similar filename nor a shared
+filename-derived ID proves recording identity. Evidence is recorded separately
+from classification. The report distinguishes exact filename, normalized path,
+explicit source-ID, chunk-sibling, and filename-similarity evidence. An
+unresolved result is retained when no local explanation is supported. Absolute
+manifest paths are redacted in reports. Repository commit, source-tree
+cleanliness, and the source-tree fingerprint are included for reproducibility.
+The forensic `manifest_fingerprint` is explicitly identified as
+`normalized_manifest_csv_rows_v1`; it is a fingerprint of normalized CSV rows,
+not the full audio audit's metadata fingerprint.
+
+The local search recursively indexes `.aac`, `.flac`, `.m4a`, `.mp3`, `.ogg`,
+`.wav`, and `.wma` filenames under `--search-root`. It does not open, hash, or
+decode candidate audio. It skips directories named `.cache`, `.coverage`,
+`.env`, `.git`, `.mypy_cache`, `.nox`, `.tox`, `.venv`, `.venv-linux`,
+`.pytest_cache`, `.ruff_cache`, `.task_pytest_tmp`, `__pycache__`, `build`,
+`cache`, `dist`, `env`, `generated`, `htmlcov`, `node_modules`, `reports`,
+`site-packages`, `target`, or `venv`. It does not follow symlink directories,
+index symlink files, or search outside the configured root. The JSON and Markdown
+reports list these exclusions and disclose incomplete filesystem scans. An
+unresolved result means no explanation was found in the accessible searched
+locations; excluded folders, other local roots, and upstream availability remain
+unverified.
+
+Classification meanings:
+
+- `path_convention_mismatch`: a local file matches the expected path after path
+  normalization or case folding; this is a location candidate, not identity proof.
+- `alternate_local_location_candidate`: a filename, path suffix, source-ID token,
+  or same-stem match exists elsewhere locally; the relationship is unverified.
+- `source_metadata_present_audio_unlocated`: source and source-recording ID
+  metadata are present, but audio was not located under the searched root.
+  Upstream source-record availability has **not** been verified.
+- `possible_segment_reference`: a local file has the same bracketed filename
+  group key with a different chunk number; segmentation remains a possibility.
+- `duplicate_reference_candidate`: one local candidate is suggested for more
+  than one missing manifest row; each relationship requires review.
+- `unresolved`: no supported explanation was found in the searched locations.
+
+Candidate source-ID matches use exact token sequences from explicit
+`source_recording_id` metadata. Filename-derived grouping IDs are considered
+only for the possible-chunk check. Neither establishes recording or performance
+identity; candidate records always set `identity_established` to `false`.
+Relative path values are trimmed and separator-normalized for resolution while
+the original relative value is retained. Absolute paths and `file://` references
+are redacted and represented by deterministic path fingerprints. Empty paths
+remain missing; unsupported absolute paths are not treated as relative paths.
+
+This analysis only reads the manifest and local filesystem. It does not decode,
+copy, recover, or modify audio; edit metadata; access external sources; or infer
+licenses, identities, or rights. It does not change the existing audit's
+duplicate-content definition.

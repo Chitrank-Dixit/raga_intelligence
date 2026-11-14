@@ -9,7 +9,7 @@ import re
 import subprocess
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 import librosa
@@ -76,6 +76,11 @@ def _first_controlled_value(row: dict[str, Any], columns: tuple[str, ...]) -> st
         if text:
             return text
     return None
+
+
+def _manifest_audio_reference(row: dict[str, Any]) -> Any:
+    """Return the audio reference using the audit's established column precedence."""
+    return row.get("file_name") or row.get("file_path") or row.get("audio_path") or row.get("path")
 
 
 def _canonical_raga(value: Any) -> str | None:
@@ -152,6 +157,10 @@ def _relative_path(root: Path, value: Any) -> tuple[str | None, Path | None, str
     name = _identity(value)
     if name is None:
         return None, None, "missing audio path"
+    if name.lower().startswith("file://"):
+        return None, None, "file URI is not a dataset-relative audio path"
+    if PureWindowsPath(name).is_absolute() and not Path(name).is_absolute():
+        return None, None, "audio path escapes dataset root"
     candidate = (root / name.replace("\\", "/")).resolve()
     try:
         relative = candidate.relative_to(root.resolve()).as_posix()
@@ -216,14 +225,16 @@ def _hash_json(value: Any) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def audit_dataset(
+def load_dataset_manifest(
     dataset_dir: str | Path,
     metadata_file: str | Path | None = None,
-) -> dict[str, Any]:
-    """Audit a CSV dataset without changing any source, annotation, or cache files."""
+) -> tuple[Path, Path, pd.DataFrame]:
+    """Load a CSV manifest using the shared dataset-root and metadata path rules."""
     root = Path(dataset_dir).expanduser().resolve()
     if not root.is_dir():
-        raise DatasetAuditError(f"Dataset directory does not exist or is not a directory: {dataset_dir}")
+        raise DatasetAuditError(
+            f"Dataset directory does not exist or is not a directory: {dataset_dir}"
+        )
     csv_path = Path(metadata_file) if metadata_file else root / "metadata.csv"
     if not csv_path.is_absolute():
         csv_path = root / csv_path
@@ -232,7 +243,18 @@ def audit_dataset(
     try:
         frame = pd.read_csv(csv_path, dtype=object, keep_default_na=False)
     except Exception as exc:
-        raise DatasetAuditError(f"Could not load dataset metadata CSV {csv_path}: {exc}") from exc
+        raise DatasetAuditError(
+            f"Could not load dataset metadata CSV {csv_path}: {exc}"
+        ) from exc
+    return root, csv_path, frame
+
+
+def audit_dataset(
+    dataset_dir: str | Path,
+    metadata_file: str | Path | None = None,
+) -> dict[str, Any]:
+    """Audit a CSV dataset without changing any source, annotation, or cache files."""
+    root, csv_path, frame = load_dataset_manifest(dataset_dir, metadata_file)
 
     rows = frame.to_dict(orient="records")
     manifest_columns = {str(column).strip().lower() for column in frame.columns}
@@ -261,7 +283,7 @@ def audit_dataset(
 
     for index, raw in enumerate(rows, start=2):
         row = {str(k).strip().lower(): v for k, v in raw.items()}
-        file_value = row.get("file_name") or row.get("file_path") or row.get("audio_path") or row.get("path")
+        file_value = _manifest_audio_reference(row)
         relative_path, audio_path, path_error = _relative_path(root, file_value)
         recording_id = _identity(row.get("recording_id"))
         recording_identity_source = "metadata" if recording_id else "missing"
